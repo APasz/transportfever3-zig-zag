@@ -5,7 +5,7 @@
             "role": "CREATOR"
         }
     ],
-    "description": "Adds a platform-free railway station for reversing trains. Its single straight track has connectable nodes at both ends, making it suitable for switchback railways, zigzags, and compact reversing points.\n\nOfficial Community TpF Discord: https://discord.gg/aq9EpJsgzg\nAus-Linux/MacOS Discord: https://discord.gg/X4H2gdEr4D\n[url=https://apasz.com]Homepage[/url]\n[url=https://ko-fi.com/apasz]Ko-fi for me ;3[/url]",
+    "description": "Adds a configurable platform-free railway station for reversing trains. Build one to eight parallel tracks with adjustable length and spacing, making it suitable for switchback railways, zigzags, and compact reversing points. Passenger and cargo loading can be enabled independently, with adjustable passenger capacity and catchment radius, while the station remains visually track-only. Construction and maintenance costs can optionally be disabled in the mod settings.\n\nOfficial Community TpF Discord: https://discord.gg/aq9EpJsgzg\nAus-Linux/MacOS Discord: https://discord.gg/X4H2gdEr4D\n[url=https://apasz.com]Homepage[/url]\n[url=https://ko-fi.com/apasz]Ko-fi for me ;3[/url]",
     "name": "Zigzag Station",
     "summary": "A platform-free rail stop for reversals and switchback lines",
     "tags": [

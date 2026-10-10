@@ -4,13 +4,21 @@ local param_util = ug_require "::/scripts/construction/param_util.tl" as ParamUt
 local CATENARY_DISABLED_INDEX: integer = 1
 local CATENARY_ENABLED_INDEX: integer = 2
 local SNAP_ANGLE_DEGREES: number = 60
-local NEGATIVE_TRACK_SNAP_NODE_INDEX: integer = 0
-local TERMINAL_TRACK_NODE_INDEX: integer = 1
-local POSITIVE_TRACK_SNAP_NODE_INDEX: integer = 3
+local NODES_PER_TRACK: integer = 4
+local NEGATIVE_SNAP_NODE_OFFSET: integer = 0
+local TERMINAL_NODE_OFFSET: integer = 1
+local POSITIVE_SNAP_NODE_OFFSET: integer = 3
 local STATION_TAG: integer = 1
-local NON_LOADING_LANE_INDEX: integer = 0
 local NON_LOADING_LANE_EDGE_INDEX: integer = 0
 local NON_LOADING_LANE_NODE_INDEX: integer = 0
+local LANE_SPEED_LIMIT: number = 30
+local PASSENGER_LANE_WIDTH_METRES: number = 2.4
+local CARGO_LANE_WIDTH_METRES: number = 4
+-- TpF3 rejects coincident transport-network edges even when their modes differ.
+local SERVICE_LANE_OFFSET_METRES: number = 0.5
+local ACCESS_LANE_WIDTH_METRES: number = 1
+local ACCESS_EXTENSION_METRES: number = 10
+local PASSENGER_CAPACITY_PER_METRE: number = 1.7
 
 local type Vector3 = {number, number, number}
 local type EdgeNode = {Vector3, Vector3}
@@ -18,8 +26,19 @@ local type IndexPair = {integer, integer}
 
 local record CapturedParams
     lengthsMetres: {integer}
-    defaultLengthIndex: integer
+    legacyLengthsMetres: {integer}
+    trackCounts: {integer}
+    trackSpacingsMetres: {integer}
+    catchmentRadiiMetres: {integer}
+    passengerCapacityMultipliers: {number}
+    defaultLengthMetres: integer
+    defaultTrackCountIndex: integer
+    defaultTrackSpacingIndex: integer
+    defaultCatchmentRadiusMetres: integer
+    defaultPassengerCapacityMultiplier: number
     defaultTrackTypeIndex: integer
+    loadingDisabledIndex: integer
+    loadingEnabledIndex: integer
     costPerMetre: number
     maintenanceCostPerMetre: number
 end
@@ -29,7 +48,16 @@ local record UpgradeCapturedParams
 end
 
 local record ConstructionParams
+    tracks: integer | nil
+    trackSpacingMetres: integer | nil
+    lengthMetres: integer | nil
     length: integer | nil
+    passengerLoadingEnabled: integer | nil
+    passengerCapacityMultiplier: number | nil
+    cargoLoadingEnabled: integer | nil
+    catchmentRadiusMetres: integer | nil
+    -- Retained to migrate stations saved with the original combined toggle.
+    loadingEnabled: integer | nil
     trackType: integer | nil
     catenary: integer | nil
     streetTemplate: string | nil
@@ -72,11 +100,18 @@ local record StationPool
     capacity: integer
 end
 
+-- The shipped CatchmentArea definition uses the runtime Vec3 record, but
+-- construction scripts serialize positions as three-element numeric arrays.
+local record ZigzagCatchmentArea
+    position: Vector3
+    radius: number
+end
+
 local record ZigzagStation
     tag: integer
     terminals: {ZigzagTerminal}
     pool: StationPool
-    catchmentAreas: {ConstructionUtilSerialized.CatchmentArea}
+    catchmentAreas: {ZigzagCatchmentArea}
 end
 
 local record StationSubconstruction
@@ -97,16 +132,165 @@ local record UpdateResult
     maintenanceCost: number
 end
 
+local function requireAllowedValue<T>(
+    allowedValues: {T},
+    value: T,
+    valueName: string
+): T
+    for _, allowedValue in ipairs(allowedValues) do
+        if value == allowedValue then
+            return value
+        end
+    end
+    error("Zigzag Station received invalid " .. valueName .. " " .. tostring(value))
+end
+
+local function requireIndexedPositiveValue(
+    values: {integer},
+    index: integer,
+    valueName: string
+): integer
+    local value = values[index]
+    if value == nil or value <= 0 then
+        error(
+            "Zigzag Station received invalid "
+                .. valueName
+                .. " index "
+                .. tostring(index)
+        )
+    end
+    return value
+end
+
 local function requireLength(captureParams: CapturedParams, params: ConstructionParams): integer
-    local lengthIndex = captureParams.defaultLengthIndex
-    if params.length ~= nil then
-        lengthIndex = params.length
+    if params.lengthMetres ~= nil then
+        return requireAllowedValue(
+            captureParams.lengthsMetres,
+            params.lengthMetres,
+            "length"
+        )
     end
-    local length = captureParams.lengthsMetres[lengthIndex]
-    if length == nil or length <= 0 then
-        error("Zigzag Station received invalid length index " .. tostring(lengthIndex))
+
+    local legacyLengthIndex = params.length
+    if legacyLengthIndex ~= nil then
+        return requireIndexedPositiveValue(
+            captureParams.legacyLengthsMetres,
+            legacyLengthIndex as integer,
+            "legacy length"
+        )
     end
-    return length
+
+    return requireAllowedValue(
+        captureParams.lengthsMetres,
+        captureParams.defaultLengthMetres,
+        "default length"
+    )
+end
+
+local function requireTrackCount(
+    captureParams: CapturedParams,
+    params: ConstructionParams
+): integer
+    local trackCountIndex = captureParams.defaultTrackCountIndex
+    if params.tracks ~= nil then
+        trackCountIndex = params.tracks
+    end
+    return requireIndexedPositiveValue(
+        captureParams.trackCounts,
+        trackCountIndex,
+        "track-count"
+    )
+end
+
+local function requireTrackSpacingMetres(
+    captureParams: CapturedParams,
+    params: ConstructionParams
+): integer
+    if params.trackSpacingMetres == nil then
+        return requireIndexedPositiveValue(
+            captureParams.trackSpacingsMetres,
+            captureParams.defaultTrackSpacingIndex,
+            "default track-spacing"
+        )
+    end
+    return requireAllowedValue(
+        captureParams.trackSpacingsMetres,
+        params.trackSpacingMetres,
+        "track spacing"
+    )
+end
+
+local function requireToggleEnabled(
+    captureParams: CapturedParams,
+    selectedIndex: integer | nil,
+    defaultIndex: integer,
+    valueName: string
+): boolean
+    local loadingIndex = selectedIndex or defaultIndex
+    if loadingIndex == captureParams.loadingDisabledIndex then
+        return false
+    end
+    if loadingIndex == captureParams.loadingEnabledIndex then
+        return true
+    end
+    error(
+        "Zigzag Station received invalid "
+            .. valueName
+            .. " index "
+            .. tostring(loadingIndex)
+    )
+end
+
+local function requireLoadingModes(
+    captureParams: CapturedParams,
+    params: ConstructionParams
+): boolean, boolean
+    local legacyLoadingIndex = params.loadingEnabled
+    local defaultLoadingIndex = captureParams.loadingDisabledIndex
+    if legacyLoadingIndex ~= nil then
+        requireToggleEnabled(
+            captureParams,
+            legacyLoadingIndex,
+            captureParams.loadingDisabledIndex,
+            "legacy loading"
+        )
+        defaultLoadingIndex = legacyLoadingIndex
+    end
+    return requireToggleEnabled(
+        captureParams,
+        params.passengerLoadingEnabled,
+        defaultLoadingIndex,
+        "passenger-loading"
+    ), requireToggleEnabled(
+        captureParams,
+        params.cargoLoadingEnabled,
+        defaultLoadingIndex,
+        "cargo-loading"
+    )
+end
+
+local function requirePassengerCapacityMultiplier(
+    captureParams: CapturedParams,
+    params: ConstructionParams
+): number
+    return requireAllowedValue(
+        captureParams.passengerCapacityMultipliers,
+        params.passengerCapacityMultiplier
+            or captureParams.defaultPassengerCapacityMultiplier,
+        "passenger capacity multiplier"
+    )
+end
+
+local function requireCatchmentRadiusMetres(
+    captureParams: CapturedParams,
+    params: ConstructionParams
+): integer
+    return requireAllowedValue(
+        captureParams.catchmentRadiiMetres,
+        params.catchmentRadiusMetres
+            or captureParams.defaultCatchmentRadiusMetres,
+        "catchment radius"
+    )
 end
 
 local function requireStreetTemplate(resourceName: string): StreetTemplate
@@ -198,93 +382,411 @@ local function supportsCatenaryConfig(
     return getCatenaryReplacement(streetTemplate, catenaryEnabled) ~= nil
 end
 
-local function makeTrackEdgeList(length: integer, trackType: string): TrackEdgeList
+local function getTrackOffsetMetres(
+    trackIndex: integer,
+    trackCount: integer,
+    trackSpacingMetres: number
+): number
+    return (trackIndex - (trackCount + 1) / 2) * trackSpacingMetres
+end
+
+local function makeTrackEdgeList(
+    length: integer,
+    trackType: string,
+    trackCount: integer,
+    trackSpacingMetres: number
+): TrackEdgeList
     local halfLength = length / 2
     local tangent: Vector3 = { 0, halfLength, 0 }
+    local edges: {EdgeNode} = {}
+    local snapNodes: {integer} = {}
+    for trackIndex = 1, trackCount do
+        local trackOffsetMetres = getTrackOffsetMetres(
+            trackIndex,
+            trackCount,
+            trackSpacingMetres
+        )
+        local firstNodeIndex = (trackIndex - 1) * NODES_PER_TRACK
+        edges[#edges + 1] = { { trackOffsetMetres, -halfLength, 0 }, tangent }
+        edges[#edges + 1] = { { trackOffsetMetres, 0, 0 }, tangent }
+        edges[#edges + 1] = { { trackOffsetMetres, 0, 0 }, tangent }
+        edges[#edges + 1] = { { trackOffsetMetres, halfLength, 0 }, tangent }
+        snapNodes[#snapNodes + 1] = firstNodeIndex + NEGATIVE_SNAP_NODE_OFFSET
+        snapNodes[#snapNodes + 1] = firstNodeIndex + POSITIVE_SNAP_NODE_OFFSET
+    end
     return {
         type = "TRACK",
         params = {
             type = trackType,
         },
-        edges = {
-            { { 0, -halfLength, 0 }, tangent },
-            { { 0, 0, 0 }, tangent },
-            { { 0, 0, 0 }, tangent },
-            { { 0, halfLength, 0 }, tangent },
-        },
-        snapNodes = {
-            NEGATIVE_TRACK_SNAP_NODE_INDEX,
-            POSITIVE_TRACK_SNAP_NODE_INDEX,
-        },
+        edges = edges,
+        snapNodes = snapNodes,
         tag2nodes = {},
         alignTerrain = true,
         maxNodeSnapAngle = SNAP_ANGLE_DEGREES,
     }
 end
 
-local function makeNonLoadingPersonLane(): ConstructionUtilSerialized.LaneList
+local function makeCombinedNonLoadingLane(
+    trackOffsetMetres: number,
+    transportMode: ConstructionUtilSerialized.TransportMode
+): ConstructionUtilSerialized.LaneList
     return lane_util.createLane(
         {
             {
-                { -0.5, 0, 0 },
-                { 0.5, 0, 0 },
+                { trackOffsetMetres - 0.5, 0, 0 },
+                { trackOffsetMetres + 0.5, 0, 0 },
             },
         },
-        { "PERSON" },
+        { transportMode },
         1,
         0,
         false
     )
 end
 
+local function makeDisabledLoadingLane(
+    laneOffsetMetres: number,
+    transportMode: ConstructionUtilSerialized.TransportMode
+): ConstructionUtilSerialized.LaneList
+    return lane_util.createLane(
+        {
+            {
+                { laneOffsetMetres, -0.5, 0 },
+                { laneOffsetMetres, 0.5, 0 },
+            },
+        },
+        { transportMode },
+        1,
+        0,
+        false
+    )
+end
+
+local function makeServiceLane(
+    laneOffsetMetres: number,
+    length: integer,
+    transportMode: ConstructionUtilSerialized.TransportMode,
+    widthMetres: number
+): ConstructionUtilSerialized.LaneList
+    local halfLength = length / 2
+    return lane_util.createLane(
+        {
+            {
+                { laneOffsetMetres, -halfLength, 0 },
+                { laneOffsetMetres, 0, 0 },
+            },
+            {
+                { laneOffsetMetres, 0, 0 },
+                { laneOffsetMetres, halfLength, 0 },
+            },
+        },
+        { transportMode },
+        LANE_SPEED_LIMIT,
+        widthMetres,
+        false
+    )
+end
+
+local function makePassengerAccessLane(
+    firstTrackOffsetMetres: number,
+    lastTrackOffsetMetres: number,
+    passengerLaneOffsetsMetres: {number},
+    longitudinalOffsetMetres: number
+): ConstructionUtilSerialized.LaneList
+    local accessPoints: {Vector3} = {
+        {
+            firstTrackOffsetMetres - ACCESS_EXTENSION_METRES,
+            longitudinalOffsetMetres,
+            0,
+        },
+    }
+    for _, passengerLaneOffsetMetres in ipairs(passengerLaneOffsetsMetres) do
+        accessPoints[#accessPoints + 1] = {
+            passengerLaneOffsetMetres,
+            longitudinalOffsetMetres,
+            0,
+        }
+    end
+    accessPoints[#accessPoints + 1] = {
+        lastTrackOffsetMetres + ACCESS_EXTENSION_METRES,
+        longitudinalOffsetMetres,
+        0,
+    }
+
+    local accessSegments: {{Vector3}} = {}
+    for pointIndex = 1, #accessPoints - 1 do
+        accessSegments[#accessSegments + 1] = {
+            accessPoints[pointIndex],
+            accessPoints[pointIndex + 1],
+        }
+    end
+    return lane_util.createLane(
+        accessSegments,
+        { "PERSON" },
+        LANE_SPEED_LIMIT,
+        ACCESS_LANE_WIDTH_METRES,
+        true
+    )
+end
+
+local function makeCargoTransferSpeed(
+    cargoClass: string,
+    length: integer
+): ConstructionUtilSerialized.TerminalDef.CargoTransferSpeed
+    return {
+        cargoTypeSet = {
+            cargoClassesIncluded = { cargoClass },
+            cargoClassesExcluded = {},
+            cargoTypesIncluded = {},
+            cargoTypesExcluded = {},
+        },
+        loadSpeedModifier = 1,
+        length = length,
+    }
+end
+
+local function makeTerminal(
+    tag: integer,
+    laneListIndex: integer,
+    vehicleNodeIndex: integer,
+    passengers: boolean,
+    cargo: boolean,
+    capacity: integer,
+    cargoTransferSpeeds: {ConstructionUtilSerialized.TerminalDef.CargoTransferSpeed},
+    transportModes: {ConstructionUtilSerialized.TransportMode}
+): ZigzagTerminal
+    return {
+        tag = tag,
+        personEdges = {
+            { laneListIndex, 0 },
+            { laneListIndex, 1 },
+        },
+        personNodes = {
+            { laneListIndex, 1 },
+        },
+        vehicleNode = { -1, vehicleNodeIndex },
+        passengers = passengers,
+        cargo = cargo,
+        capacity = capacity,
+        comfortFactor = 1,
+        cargoTransferSpeeds = cargoTransferSpeeds,
+        transportModes = transportModes,
+    }
+end
+
+local function makeNonLoadingTerminal(
+    tag: integer,
+    laneListIndex: integer,
+    vehicleNodeIndex: integer,
+    passengers: boolean,
+    cargo: boolean,
+    transportModes: {ConstructionUtilSerialized.TransportMode}
+): ZigzagTerminal
+    return {
+        tag = tag,
+        personEdges = {
+            { laneListIndex, NON_LOADING_LANE_EDGE_INDEX },
+        },
+        personNodes = {
+            { laneListIndex, NON_LOADING_LANE_NODE_INDEX },
+        },
+        vehicleNode = { -1, vehicleNodeIndex },
+        passengers = passengers,
+        cargo = cargo,
+        capacity = 0,
+        comfortFactor = 1,
+        cargoTransferSpeeds = {},
+        transportModes = transportModes,
+    }
+end
+
+local function passengerCapacity(length: integer, multiplier: number): integer
+    local baseCapacity = math.max(
+        math.floor(length * PASSENGER_CAPACITY_PER_METRE + 0.5),
+        1
+    )
+    return math.max(math.floor(baseCapacity * multiplier + 0.5), 1)
+end
+
 local function makeStationSubconstruction(
+    length: integer,
+    trackCount: integer,
+    trackSpacingMetres: number,
+    passengerLoadingEnabled: boolean,
+    cargoLoadingEnabled: boolean,
+    passengerCapacityMultiplier: number,
+    catchmentRadiusMetres: integer,
     transportModes: {ConstructionUtilSerialized.TransportMode}
 ): StationSubconstruction
+    local laneLists: {ConstructionUtilSerialized.LaneList} = {}
+    local terminals: {ZigzagTerminal} = {}
+    local passengerLaneOffsetsMetres: {number} = {}
+    local loadingEnabled = passengerLoadingEnabled or cargoLoadingEnabled
+    for trackIndex = 1, trackCount do
+        local zeroBasedTrackIndex = trackIndex - 1
+        local trackOffsetMetres = getTrackOffsetMetres(
+            trackIndex,
+            trackCount,
+            trackSpacingMetres
+        )
+        local vehicleNodeIndex = zeroBasedTrackIndex * NODES_PER_TRACK
+            + TERMINAL_NODE_OFFSET
+        local passengerLaneOffsetMetres = trackOffsetMetres
+            - SERVICE_LANE_OFFSET_METRES
+        local cargoLaneOffsetMetres = trackOffsetMetres
+            + SERVICE_LANE_OFFSET_METRES
+        if loadingEnabled then
+            -- A disabled loading mode keeps a zero-capacity terminal so that
+            -- its trains can still use the station as a reversing point.
+            local passengerLaneIndex = #laneLists
+            if passengerLoadingEnabled then
+                passengerLaneOffsetsMetres[#passengerLaneOffsetsMetres + 1]
+                    = passengerLaneOffsetMetres
+                laneLists[#laneLists + 1] = makeServiceLane(
+                    passengerLaneOffsetMetres,
+                    length,
+                    "PERSON",
+                    PASSENGER_LANE_WIDTH_METRES
+                )
+                terminals[#terminals + 1] = makeTerminal(
+                    zeroBasedTrackIndex * 2,
+                    passengerLaneIndex,
+                    vehicleNodeIndex,
+                    true,
+                    false,
+                    passengerCapacity(length, passengerCapacityMultiplier),
+                    { makeCargoTransferSpeed("PASSENGERS", length) },
+                    transportModes
+                )
+            else
+                laneLists[#laneLists + 1] = makeDisabledLoadingLane(
+                    passengerLaneOffsetMetres,
+                    "PERSON"
+                )
+                terminals[#terminals + 1] = makeNonLoadingTerminal(
+                    zeroBasedTrackIndex * 2,
+                    passengerLaneIndex,
+                    vehicleNodeIndex,
+                    true,
+                    false,
+                    transportModes
+                )
+            end
+
+            local cargoLaneIndex = #laneLists
+            if cargoLoadingEnabled then
+                laneLists[#laneLists + 1] = makeServiceLane(
+                    cargoLaneOffsetMetres,
+                    length,
+                    "CARGO",
+                    CARGO_LANE_WIDTH_METRES
+                )
+                terminals[#terminals + 1] = makeTerminal(
+                    zeroBasedTrackIndex * 2 + 1,
+                    cargoLaneIndex,
+                    vehicleNodeIndex,
+                    false,
+                    true,
+                    0,
+                    { makeCargoTransferSpeed("UNIVERSAL", length) },
+                    transportModes
+                )
+            else
+                laneLists[#laneLists + 1] = makeDisabledLoadingLane(
+                    cargoLaneOffsetMetres,
+                    "CARGO"
+                )
+                terminals[#terminals + 1] = makeNonLoadingTerminal(
+                    zeroBasedTrackIndex * 2 + 1,
+                    cargoLaneIndex,
+                    vehicleNodeIndex,
+                    false,
+                    true,
+                    transportModes
+                )
+            end
+        else
+            local laneListIndex = #laneLists
+            laneLists[#laneLists + 1] = makeCombinedNonLoadingLane(
+                trackOffsetMetres,
+                "PERSON"
+            )
+            terminals[#terminals + 1] = makeNonLoadingTerminal(
+                zeroBasedTrackIndex,
+                laneListIndex,
+                vehicleNodeIndex,
+                true,
+                true,
+                transportModes
+            )
+        end
+    end
+
+    local catchmentAreas: {ZigzagCatchmentArea} = {}
+    if loadingEnabled then
+        local halfLength = length / 2
+        local firstTrackOffsetMetres = getTrackOffsetMetres(
+            1,
+            trackCount,
+            trackSpacingMetres
+        )
+        local lastTrackOffsetMetres = getTrackOffsetMetres(
+            trackCount,
+            trackCount,
+            trackSpacingMetres
+        )
+        local accessLaneOffsetsMetres: {number} = { -halfLength, 0, halfLength }
+        for _, longitudinalOffsetMetres in ipairs(accessLaneOffsetsMetres) do
+            if passengerLoadingEnabled then
+                laneLists[#laneLists + 1] = makePassengerAccessLane(
+                    firstTrackOffsetMetres,
+                    lastTrackOffsetMetres,
+                    passengerLaneOffsetsMetres,
+                    longitudinalOffsetMetres
+                )
+            end
+            catchmentAreas[#catchmentAreas + 1] = {
+                position = { 0.0, longitudinalOffsetMetres, 0.0 },
+                radius = catchmentRadiusMetres,
+            }
+        end
+    end
     return {
         tag = STATION_TAG,
         models = {},
         colliders = {},
         terrainAlignmentLists = {},
         groundFaces = {},
-        -- TpF3 requires every terminal to reference an unambiguous PERSON or
-        -- CARGO lane. This one exists only for validation, not for access.
-        laneLists = {
-            makeNonLoadingPersonLane(),
-        },
+        -- TpF3 requires every terminal to reference lanes of one unambiguous
+        -- service type, so loading mode uses separate passenger and cargo lanes.
+        laneLists = laneLists,
         emissionEmitter = {},
         station = {
             tag = STATION_TAG,
-            terminals = {
-                {
-                    tag = 0,
-                    personEdges = {
-                        { NON_LOADING_LANE_INDEX, NON_LOADING_LANE_EDGE_INDEX },
-                    },
-                    personNodes = {
-                        { NON_LOADING_LANE_INDEX, NON_LOADING_LANE_NODE_INDEX },
-                    },
-                    vehicleNode = { -1, TERMINAL_TRACK_NODE_INDEX },
-                    -- Both flags prevent line-manager incompatibility errors;
-                    -- zero capacity and no catchment keep this a reversing stop.
-                    passengers = true,
-                    cargo = true,
-                    capacity = 0,
-                    comfortFactor = 1,
-                    cargoTransferSpeeds = {},
-                    transportModes = transportModes,
-                },
-            },
+            terminals = terminals,
             pool = {
                 edges = {},
                 capacity = 0,
             },
-            catchmentAreas = {},
+            catchmentAreas = catchmentAreas,
         },
     }
 end
 
 local function updateFn(captureParams: CapturedParams, params: ConstructionParams): UpdateResult
     local length = requireLength(captureParams, params)
+    local trackCount = requireTrackCount(captureParams, params)
+    local trackSpacingMetres = requireTrackSpacingMetres(captureParams, params)
+    local passengerLoadingEnabled, cargoLoadingEnabled = requireLoadingModes(
+        captureParams,
+        params
+    )
+    local passengerCapacityMultiplier = requirePassengerCapacityMultiplier(
+        captureParams,
+        params
+    )
+    local catchmentRadiusMetres = requireCatchmentRadiusMetres(captureParams, params)
     local catenaryEnabled = requireCatenaryEnabled(params.catenary)
     local trackType = requireTrackType(
         params,
@@ -294,13 +796,27 @@ local function updateFn(captureParams: CapturedParams, params: ConstructionParam
     local transportModes = makeTrackTransportModes(catenaryEnabled)
     return {
         edgeLists = {
-            makeTrackEdgeList(length, trackType),
+            makeTrackEdgeList(
+                length,
+                trackType,
+                trackCount,
+                trackSpacingMetres
+            ),
         },
         subconstructions = {
-            makeStationSubconstruction(transportModes),
+            makeStationSubconstruction(
+                length,
+                trackCount,
+                trackSpacingMetres,
+                passengerLoadingEnabled,
+                cargoLoadingEnabled,
+                passengerCapacityMultiplier,
+                catchmentRadiusMetres,
+                transportModes
+            ),
         },
-        cost = length * captureParams.costPerMetre,
-        maintenanceCost = length * captureParams.maintenanceCostPerMetre,
+        cost = length * trackCount * captureParams.costPerMetre,
+        maintenanceCost = length * trackCount * captureParams.maintenanceCostPerMetre,
     }
 end
 

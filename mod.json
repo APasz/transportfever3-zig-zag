@@ -4,16 +4,28 @@
     "incompatibilities": null,
     "modId": "apasz_zigzag",
     "options": null,
-    "params": null,
+    "params": [
+        {
+            "defaultIndex": 1,
+            "key": "apasz_zigzag_costs_enabled",
+            "name": "apasz_zigzag_costs_enabled",
+            "tooltip": "apasz_zigzag_costs_enabled_tooltip",
+            "uiType": "CheckBox",
+            "values": [
+                "apasz_zigzag_off",
+                "apasz_zigzag_on"
+            ]
+        }
+    ],
     "postRunScript": {
         "fileName": ""
     },
     "preRunScript": {
         "fileName": ""
     },
-    "revision": 1,
+    "revision": 2,
     "runScript": {
-        "fileName": ""
+        "fileName": "apasz_zigzag::/mod.script@runFn"
     },
     "severityAdd": "None",
     "severityRemove": "Warning"
