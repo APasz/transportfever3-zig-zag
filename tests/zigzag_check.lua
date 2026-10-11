@@ -89,6 +89,31 @@ local function assertNoOverlappingLaneEdges(laneLists, context)
     end
 end
 
+local function assertUniqueTerminalVehicleNodes(terminals, trackEdgeList, context)
+    local seenPositions = {}
+    for terminalIndex, terminal in ipairs(terminals) do
+        assertEqual(
+            terminal.vehicleNode[1],
+            -1,
+            context .. " terminal " .. terminalIndex .. " edge-list marker"
+        )
+        local edgeNode = assert(
+            trackEdgeList.edges[terminal.vehicleNode[2] + 1],
+            context .. " terminal has an invalid vehicle-node index"
+        )
+        local position = pointKey(edgeNode[1])
+        if seenPositions[position] ~= nil then
+            error(string.format(
+                "%s: terminal %d shares its vehicle node with terminal %d",
+                context,
+                terminalIndex,
+                seenPositions[position]
+            ))
+        end
+        seenPositions[position] = terminalIndex
+    end
+end
+
 local function readTgaSize(path)
     local file = assert(io.open(path, "rb"))
     assert(file:seek("set", 12))
@@ -277,7 +302,7 @@ local expectedPassengerCapacityMultipliers = {
     0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3,
 }
 local expectedTrackSpacingMetres = 5
-local nodesPerTrack = 4
+local nodesPerTrack = 8
 assertEqual(
     construction.namePrefix,
     "apasz_zigzag_name_prefix",
@@ -583,7 +608,7 @@ local function assertLengthResult(params, lengthMetres, context)
         "negative endpoint for " .. context
     )
     assertEqual(
-        lengthTrack.edges[4][1][2],
+        lengthTrack.edges[nodesPerTrack][1][2],
         halfLength,
         "positive endpoint for " .. context
     )
@@ -666,7 +691,7 @@ for trackCountIndex, trackCount in ipairs(expectedTrackCounts) do
         )
         assertEqual(
             trackCountEdgeList.snapNodes[zeroBasedTrackIndex * 2 + 2],
-            firstNodeIndex + 3,
+            firstNodeIndex + nodesPerTrack - 1,
             "positive snap node for track " .. trackIndex .. " of " .. trackCount
         )
 
@@ -694,7 +719,7 @@ for trackCountIndex, trackCount in ipairs(expectedTrackCounts) do
         )
         assertEqual(
             trackTerminal.vehicleNode[2],
-            firstNodeIndex + 1,
+            firstNodeIndex + 3,
             "terminal centre node for track " .. trackIndex
         )
     end
@@ -744,15 +769,18 @@ assertEqual(track.type, "TRACK", "edge-list type")
 assertEqual(track.params.type, "standard.track", "selected track type")
 assertEqual(#track.edges, nodesPerTrack, "track node count")
 assertEqual(track.edges[1][1][2], -5, "negative endpoint")
-assertEqual(track.edges[1][2][2], 5, "negative endpoint tangent")
-assertEqual(track.edges[2][1][2], 0, "negative half centre node")
-assertEqual(track.edges[2][2][2], 5, "negative half tangent")
-assertEqual(track.edges[3][1][2], 0, "positive half centre node")
-assertEqual(track.edges[3][2][2], 5, "positive half tangent")
-assertEqual(track.edges[4][1][2], 5, "positive endpoint")
-assertEqual(track.edges[4][2][2], 5, "positive endpoint outward tangent")
+assertEqual(track.edges[1][2][2], 4.5, "negative outer edge tangent")
+assertEqual(track.edges[2][1][2], -0.5, "passenger stop node")
+assertEqual(track.edges[3][1][2], -0.5, "passenger stop connection node")
+assertEqual(track.edges[3][2][2], 0.5, "negative inner edge tangent")
+assertEqual(track.edges[4][1][2], 0, "non-loading centre node")
+assertEqual(track.edges[5][1][2], 0, "non-loading centre connection node")
+assertEqual(track.edges[6][1][2], 0.5, "cargo stop node")
+assertEqual(track.edges[7][1][2], 0.5, "cargo stop connection node")
+assertEqual(track.edges[8][1][2], 5, "positive endpoint")
+assertEqual(track.edges[8][2][2], 4.5, "positive outer edge tangent")
 assertEqual(track.snapNodes[1], 0, "negative snap node")
-assertEqual(track.snapNodes[2], 3, "second snap node")
+assertEqual(track.snapNodes[2], 7, "positive snap node")
 
 local stationSubconstruction = result.subconstructions[1]
 assertEqual(#stationSubconstruction.laneLists, 1, "non-loading lane count")
@@ -769,7 +797,7 @@ assertEqual(terminal.personEdges[1][1], 0, "terminal person lane index")
 assertEqual(terminal.personEdges[1][2], 0, "terminal person edge index")
 assertEqual(#terminal.personNodes, 1, "terminal person node count")
 assertEqual(terminal.vehicleNode[1], -1, "terminal construction edge-list marker")
-assertEqual(terminal.vehicleNode[2], 1, "terminal centre node")
+assertEqual(terminal.vehicleNode[2], 3, "terminal centre node")
 assertEqual(terminal.passengers, true, "passenger-line compatibility")
 assertEqual(terminal.cargo, true, "cargo-line compatibility")
 assertEqual(terminal.capacity, 0, "terminal capacity")
@@ -804,7 +832,8 @@ for trackIndex = 1, 2 do
     local passengerLaneIndex = zeroBasedTrackIndex * 2
     local cargoLaneIndex = passengerLaneIndex + 1
     local expectedTrackOffset = trackIndex == 1 and -3 or 3
-    local expectedVehicleNode = zeroBasedTrackIndex * nodesPerTrack + 1
+    local expectedPassengerVehicleNode = zeroBasedTrackIndex * nodesPerTrack + 1
+    local expectedCargoVehicleNode = zeroBasedTrackIndex * nodesPerTrack + 5
 
     local passengerLane = loadingSubconstruction.laneLists[passengerLaneIndex + 1]
     assertEqual(#passengerLane.nodes, 4, "passenger lane node count for track " .. trackIndex)
@@ -823,7 +852,11 @@ for trackIndex = 1, 2 do
     assertEqual(passengerTerminal.personEdges[1][1], passengerLaneIndex, "passenger terminal lane")
     assertEqual(passengerTerminal.personEdges[1][2], 0, "passenger terminal first edge")
     assertEqual(passengerTerminal.personEdges[2][2], 1, "passenger terminal second edge")
-    assertEqual(passengerTerminal.vehicleNode[2], expectedVehicleNode, "passenger vehicle node")
+    assertEqual(
+        passengerTerminal.vehicleNode[2],
+        expectedPassengerVehicleNode,
+        "passenger vehicle node"
+    )
     assertEqual(#passengerTerminal.cargoTransferSpeeds, 1, "passenger transfer-speed count")
     local passengerTransfer = passengerTerminal.cargoTransferSpeeds[1]
     assertEqual(passengerTransfer.cargoTypeSet.cargoClassesIncluded[1], "PASSENGERS", "passenger cargo class")
@@ -842,13 +875,18 @@ for trackIndex = 1, 2 do
     assertEqual(cargoTerminal.cargo, true, "cargo terminal cargo support")
     assertEqual(cargoTerminal.capacity, 0, "cargo terminal capacity")
     assertEqual(cargoTerminal.personEdges[1][1], cargoLaneIndex, "cargo terminal lane")
-    assertEqual(cargoTerminal.vehicleNode[2], expectedVehicleNode, "cargo vehicle node")
+    assertEqual(cargoTerminal.vehicleNode[2], expectedCargoVehicleNode, "cargo vehicle node")
     assertEqual(#cargoTerminal.cargoTransferSpeeds, 1, "cargo transfer-speed count")
     local cargoTransfer = cargoTerminal.cargoTransferSpeeds[1]
     assertEqual(cargoTransfer.cargoTypeSet.cargoClassesIncluded[1], "UNIVERSAL", "cargo class")
     assertEqual(cargoTransfer.loadSpeedModifier, 1, "cargo load-speed modifier")
     assertEqual(cargoTransfer.length, 40, "cargo transfer length")
 end
+assertUniqueTerminalVehicleNodes(
+    loadingStation.terminals,
+    loadingResult.edgeLists[1],
+    "loading-mode terminals"
+)
 
 for accessLaneIndex, expectedLongitudinalOffset in ipairs({ -20, 0, 20 }) do
     local accessLane = loadingSubconstruction.laneLists[accessLaneIndex + 4]
@@ -1079,6 +1117,11 @@ for _, loadingMode in ipairs(activeLoadingModes) do
                 assertNoOverlappingLaneEdges(
                     combinationSubconstruction.laneLists,
                     "loading lanes for " .. context
+                )
+                assertUniqueTerminalVehicleNodes(
+                    combinationStation.terminals,
+                    combinationResult.edgeLists[1],
+                    "loading terminals for " .. context
                 )
             end
         end

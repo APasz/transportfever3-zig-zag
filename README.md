@@ -5,7 +5,7 @@ A platform-free railway station for reversing trains and building switchback or 
 ## Features
 
 - One to eight parallel station tracks with connectable nodes at both ends.
-- One physical stopping point at the centre of each track.
+- A centred reversing point, with closely spaced passenger and cargo stops when loading is enabled.
 - Compatible with both passenger and cargo consists in the line manager.
 - Independently optional passenger and cargo loading.
 - Passenger capacity adjustable from 0.5× to 3×, with 1× as the default.
@@ -52,7 +52,9 @@ station from acting as a normal platform.
 
 When either loading mode is enabled, each track has separate invisible passenger and cargo
 terminals. A disabled mode retains a zero-capacity, zero-transfer terminal so that its trains can
-still use the station for reversing. Passenger capacity scales with the selected track length and
-capacity multiplier. Linkable pedestrian lanes are only generated for passenger loading; they
-cross the tracks at both ends and the midpoint, extending ten metres beyond each outer track.
-Loading stations have catchment areas at both ends and the midpoint using the selected radius.
+still use the station for reversing. The terminals use distinct stop nodes one metre apart because
+TpF3 requires every vehicle stop node to identify one terminal. Passenger capacity scales with the
+selected track length and capacity multiplier. Linkable pedestrian lanes are only generated for
+passenger loading; they cross the tracks at both ends and the midpoint, extending ten metres beyond
+each outer track. Loading stations have catchment areas at both ends and the midpoint using the
+selected radius.

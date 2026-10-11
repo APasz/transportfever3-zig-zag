@@ -4,10 +4,13 @@ local param_util = ug_require "::/scripts/construction/param_util.tl" as ParamUt
 local CATENARY_DISABLED_INDEX: integer = 1
 local CATENARY_ENABLED_INDEX: integer = 2
 local SNAP_ANGLE_DEGREES: number = 60
-local NODES_PER_TRACK: integer = 4
+local NODES_PER_TRACK: integer = 8
 local NEGATIVE_SNAP_NODE_OFFSET: integer = 0
-local TERMINAL_NODE_OFFSET: integer = 1
-local POSITIVE_SNAP_NODE_OFFSET: integer = 3
+local PASSENGER_TERMINAL_NODE_OFFSET: integer = 1
+local NON_LOADING_TERMINAL_NODE_OFFSET: integer = 3
+local CARGO_TERMINAL_NODE_OFFSET: integer = 5
+local POSITIVE_SNAP_NODE_OFFSET: integer = 7
+local TERMINAL_NODE_SEPARATION_METRES: number = 1
 local STATION_TAG: integer = 1
 local NON_LOADING_LANE_EDGE_INDEX: integer = 0
 local NON_LOADING_LANE_NODE_INDEX: integer = 0
@@ -390,6 +393,27 @@ local function getTrackOffsetMetres(
     return (trackIndex - (trackCount + 1) / 2) * trackSpacingMetres
 end
 
+local function addStraightTrackEdge(
+    edges: {EdgeNode},
+    trackOffsetMetres: number,
+    firstLongitudinalOffsetMetres: number,
+    secondLongitudinalOffsetMetres: number
+)
+    local tangent: Vector3 = {
+        0,
+        secondLongitudinalOffsetMetres - firstLongitudinalOffsetMetres,
+        0,
+    }
+    edges[#edges + 1] = {
+        { trackOffsetMetres, firstLongitudinalOffsetMetres, 0 },
+        tangent,
+    }
+    edges[#edges + 1] = {
+        { trackOffsetMetres, secondLongitudinalOffsetMetres, 0 },
+        tangent,
+    }
+end
+
 local function makeTrackEdgeList(
     length: integer,
     trackType: string,
@@ -397,7 +421,7 @@ local function makeTrackEdgeList(
     trackSpacingMetres: number
 ): TrackEdgeList
     local halfLength = length / 2
-    local tangent: Vector3 = { 0, halfLength, 0 }
+    local halfTerminalNodeSeparationMetres = TERMINAL_NODE_SEPARATION_METRES / 2
     local edges: {EdgeNode} = {}
     local snapNodes: {integer} = {}
     for trackIndex = 1, trackCount do
@@ -407,10 +431,30 @@ local function makeTrackEdgeList(
             trackSpacingMetres
         )
         local firstNodeIndex = (trackIndex - 1) * NODES_PER_TRACK
-        edges[#edges + 1] = { { trackOffsetMetres, -halfLength, 0 }, tangent }
-        edges[#edges + 1] = { { trackOffsetMetres, 0, 0 }, tangent }
-        edges[#edges + 1] = { { trackOffsetMetres, 0, 0 }, tangent }
-        edges[#edges + 1] = { { trackOffsetMetres, halfLength, 0 }, tangent }
+        addStraightTrackEdge(
+            edges,
+            trackOffsetMetres,
+            -halfLength,
+            -halfTerminalNodeSeparationMetres
+        )
+        addStraightTrackEdge(
+            edges,
+            trackOffsetMetres,
+            -halfTerminalNodeSeparationMetres,
+            0
+        )
+        addStraightTrackEdge(
+            edges,
+            trackOffsetMetres,
+            0,
+            halfTerminalNodeSeparationMetres
+        )
+        addStraightTrackEdge(
+            edges,
+            trackOffsetMetres,
+            halfTerminalNodeSeparationMetres,
+            halfLength
+        )
         snapNodes[#snapNodes + 1] = firstNodeIndex + NEGATIVE_SNAP_NODE_OFFSET
         snapNodes[#snapNodes + 1] = firstNodeIndex + POSITIVE_SNAP_NODE_OFFSET
     end
@@ -630,8 +674,13 @@ local function makeStationSubconstruction(
             trackCount,
             trackSpacingMetres
         )
-        local vehicleNodeIndex = zeroBasedTrackIndex * NODES_PER_TRACK
-            + TERMINAL_NODE_OFFSET
+        local firstTrackNodeIndex = zeroBasedTrackIndex * NODES_PER_TRACK
+        local passengerVehicleNodeIndex = firstTrackNodeIndex
+            + PASSENGER_TERMINAL_NODE_OFFSET
+        local nonLoadingVehicleNodeIndex = firstTrackNodeIndex
+            + NON_LOADING_TERMINAL_NODE_OFFSET
+        local cargoVehicleNodeIndex = firstTrackNodeIndex
+            + CARGO_TERMINAL_NODE_OFFSET
         local passengerLaneOffsetMetres = trackOffsetMetres
             - SERVICE_LANE_OFFSET_METRES
         local cargoLaneOffsetMetres = trackOffsetMetres
@@ -652,7 +701,7 @@ local function makeStationSubconstruction(
                 terminals[#terminals + 1] = makeTerminal(
                     zeroBasedTrackIndex * 2,
                     passengerLaneIndex,
-                    vehicleNodeIndex,
+                    passengerVehicleNodeIndex,
                     true,
                     false,
                     passengerCapacity(length, passengerCapacityMultiplier),
@@ -667,7 +716,7 @@ local function makeStationSubconstruction(
                 terminals[#terminals + 1] = makeNonLoadingTerminal(
                     zeroBasedTrackIndex * 2,
                     passengerLaneIndex,
-                    vehicleNodeIndex,
+                    passengerVehicleNodeIndex,
                     true,
                     false,
                     transportModes
@@ -685,7 +734,7 @@ local function makeStationSubconstruction(
                 terminals[#terminals + 1] = makeTerminal(
                     zeroBasedTrackIndex * 2 + 1,
                     cargoLaneIndex,
-                    vehicleNodeIndex,
+                    cargoVehicleNodeIndex,
                     false,
                     true,
                     0,
@@ -700,7 +749,7 @@ local function makeStationSubconstruction(
                 terminals[#terminals + 1] = makeNonLoadingTerminal(
                     zeroBasedTrackIndex * 2 + 1,
                     cargoLaneIndex,
-                    vehicleNodeIndex,
+                    cargoVehicleNodeIndex,
                     false,
                     true,
                     transportModes
@@ -715,7 +764,7 @@ local function makeStationSubconstruction(
             terminals[#terminals + 1] = makeNonLoadingTerminal(
                 zeroBasedTrackIndex,
                 laneListIndex,
-                vehicleNodeIndex,
+                nonLoadingVehicleNodeIndex,
                 true,
                 true,
                 transportModes
