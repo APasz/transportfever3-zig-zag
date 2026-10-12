@@ -201,6 +201,9 @@ end
 package.preload["apasz_zigzag::/zigzag/logging_config.lua"] = function()
     return false
 end
+package.preload["apasz_zigzag::/zigzag/construction_path.lua"] = function()
+    return assert(loadfile("content/zigzag/construction_path.lua"))()
+end
 package.preload["apasz_zigzag::/zigzag/logging.lua"] = function()
     return assert(loadfile("content/zigzag/logging.lua"))()
 end
@@ -551,6 +554,214 @@ assertEqual(
     "InputActionOnly",
     "catchment hidden with both loading modes disabled"
 )
+
+do
+    local constructionEntity = 101
+    local stationEntity = 102
+    local stationGroupEntity = 103
+    local constructionComponent = { stations = { stationEntity } }
+    local resolvedStationGroup = stationGroupEntity
+    local gameContext = {}
+    local actionFunctionAndProxy = { function() end, "action-proxy" }
+    local closeConditionAndProxy = { function() return false end, "close-proxy" }
+    local nativeWindowResult = {
+        recipe = function() end,
+        param = { keyEntity = stationGroupEntity },
+        fallbackTitle = "Station",
+        autoCloseCondition = closeConditionAndProxy[1],
+        autoCloseCondition_compareProxy = closeConditionAndProxy[2],
+    }
+    local factoryCalls = 0
+    local expectedMode
+
+    package.preload["::/gui/entity_window/make_entity_window.tl"] = function()
+        return {
+            makeEntityWindowContent = function(
+                entity, context, isMapEditor, isSandboxMode, skipConstruction,
+                actions, closeCondition, closeFunction
+            )
+                factoryCalls = factoryCalls + 1
+                assertEqual(entity, stationGroupEntity, "native window uses the station group")
+                assertEqual(context, gameContext, "native window game context")
+                assertEqual(isMapEditor, expectedMode[1], "native window map-editor mode")
+                assertEqual(isSandboxMode, expectedMode[2], "native window sandbox mode")
+                assertEqual(skipConstruction, true, "native dispatch bypasses the Zigzag hook")
+                assertEqual(actions, actionFunctionAndProxy, "native window selection actions")
+                assertEqual(closeCondition, closeConditionAndProxy, "native window lifetime")
+                assertEqual(closeFunction, nil, "station content needs no separate close handler")
+                return nativeWindowResult
+            end,
+        }
+    end
+    _G.api = {
+        type = { ComponentType = { CONSTRUCTION = "CONSTRUCTION" } },
+        engine = {
+            getComponent = function(entity, componentType)
+                assertEqual(entity, constructionEntity, "selected Zigzag construction")
+                assertEqual(componentType, "CONSTRUCTION", "selected entity component")
+                return constructionComponent
+            end,
+            system = {
+                stationGroupSystem = {
+                    getStationGroup = function(entity)
+                        assertEqual(entity, stationEntity, "Zigzag station group lookup")
+                        return resolvedStationGroup
+                    end,
+                },
+            },
+        },
+    }
+
+    local resourceName, callbackName = construction.entityWindowScript.fileName:match(
+        "^(.-)@([^@]+)$"
+    )
+    assert(resourceName, "station window must reference a script callback")
+    local windowScript = loadData("content/stations/rail/zigzag/" .. resourceName .. ".lua")
+    local openStationWindow = assert(windowScript[callbackName], "missing station window callback")
+    local function openWindow()
+        return openStationWindow(
+            construction.entityWindowScript.params, constructionEntity, "test.zigzag.",
+            gameContext, expectedMode[1], expectedMode[2],
+            actionFunctionAndProxy, closeConditionAndProxy
+        )
+    end
+
+    for _, mode in ipairs({ { false, false }, { true, false }, { false, true }, { true, true } }) do
+        expectedMode = mode
+        local result = openWindow()
+        assertEqual(result, nativeWindowResult, "reuse native station content and lifecycle")
+        assertEqual(result.param.keyEntity, stationGroupEntity, "native content station identity")
+        assertEqual(result.replacedEntity, constructionEntity, "rename the construction name stem")
+    end
+    assertEqual(factoryCalls, 4, "one native window dispatch per selection")
+
+    local function assertInvalidWindowState(expectedError)
+        local ok, message = pcall(openWindow)
+        assertEqual(ok, false, "invalid station window state is rejected")
+        assert(tostring(message):find(expectedError, 1, true), tostring(message))
+        assertEqual(factoryCalls, 4, "invalid state never reaches the native window")
+    end
+
+    constructionComponent = nil
+    assertInvalidWindowState("requires a construction")
+    for _, stations in ipairs({ {}, { stationEntity, stationEntity + 1 } }) do
+        constructionComponent = { stations = stations }
+        assertInvalidWindowState("requires exactly one station")
+    end
+    constructionComponent = { stations = { stationEntity } }
+    resolvedStationGroup = -1
+    assertInvalidWindowState("has no station group")
+    resolvedStationGroup = nil
+    assertInvalidWindowState("has no station group")
+    _G.api = nil
+end
+
+do
+    _G.getOwningModId = function() return "apasz_zigzag" end
+    local descriptor = loadData("content/stations/rail/zigzag/zigzag.selection.gs.lua")
+    _G.getOwningModId = nil
+    local selection = loadData(
+        "content/stations/rail/zigzag/zigzag.selection.script.lua"
+    )
+    local function registeredCallback(scriptRef)
+        local scriptName, callbackName = scriptRef.fileName:match("^(.-)@([^@]+)$")
+        assertEqual(scriptName, "zigzag.selection.script", "selection callback resource")
+        return assert(selection[callbackName], "missing registered selection callback")
+    end
+    local update = registeredCallback(descriptor.updateScript)
+    local handleEvent = registeredCallback(descriptor.handleEventScript)
+    local guiHandleEvent = registeredCallback(descriptor.guiHandleEventScript)
+    local subscriptions = {}
+    local state = {
+        hasEventSubscriptions = function() return #subscriptions > 0 end,
+        subscribeToEvent = function(_, name) subscriptions[#subscriptions + 1] = name end,
+    }
+    update({}, state, 0)
+    update({}, state, 0)
+    assertEqual(#subscriptions, 1, "subscribe to selection once")
+    assertEqual(subscriptions[1], "select", "subscribe to the native selection event")
+    assertEqual(handleEvent({}, state, "", "mainView", "select", 104), nil,
+        "simulation handler leaves selection unchanged")
+
+    local params = descriptor.guiHandleEventScript.params
+    assertEqual(params.constructionFileName, "apasz_zigzag" .. require(
+        "apasz_zigzag::/zigzag/construction_path.lua"
+    ), "selection uses the shared Zigzag construction identity")
+    local windowScriptName = "apasz_zigzag::/stations/rail/zigzag/"
+        .. construction.entityWindowScript.fileName
+    local generatedConstructionName = "generated-zigzag"
+    local descriptions = {
+        [params.constructionFileName] = { entityWindowScript = { fileName = windowScriptName } },
+        [generatedConstructionName] = { entityWindowScript = { fileName = windowScriptName } },
+        ["other_mod::/other.con"] = {
+            entityWindowScript = { fileName = "other_mod::/other.window.script@open" },
+        },
+        ["other_mod::/empty.con"] = { entityWindowScript = { fileName = "" } },
+    }
+    local components = {
+        [101] = { CONSTRUCTION = { fileName = generatedConstructionName } },
+        [102] = { STATION = {} },
+        [104] = { BASE_EDGE = {} },
+        [105] = { BASE_EDGE = {} },
+        [106] = { BASE_EDGE = {} },
+        [107] = { BASE_EDGE = {} },
+        [201] = { CONSTRUCTION = { fileName = "other_mod::/other.con" } },
+        [202] = { CONSTRUCTION = { fileName = "other_mod::/empty.con" } },
+    }
+    local owners = { [104] = 101, [106] = 201, [107] = 202 }
+    local events = {}
+    _G.api = {
+        type = { ComponentType = { BASE_EDGE = "BASE_EDGE", CONSTRUCTION = "CONSTRUCTION" } },
+        res = {
+            constructionRep = {
+                findAndGet = function(resourceName) return assert(descriptions[resourceName]) end,
+            },
+        },
+        engine = {
+            entityExists = function(entity) return components[entity] ~= nil end,
+            getComponent = function(entity, kind) return components[entity][kind] end,
+            system = {
+                streetConnectorSystem = {
+                    getConstructionEntityForEdge = function(entity) return owners[entity] or -1 end,
+                },
+            },
+        },
+        gui = {
+            fireReactEvent = function(name, param)
+                events[#events + 1] = { name = name, entity = param.entity }
+            end,
+        },
+    }
+    local function selectEntity(entity, id, name)
+        return guiHandleEvent(params, {}, {}, "", id or "mainView", name or "select", entity)
+    end
+    selectEntity(104)
+    assertEqual(#events, 1, "one window request for a track in a generated Zigzag construction")
+    assertEqual(events[1].name, "selectEntity", "use native entity-window dispatch")
+    assertEqual(events[1].entity, 101, "open the owning construction's station window")
+    for _, entity in ipairs({ -1, 999, 101, 102, 105, 106, 107 }) do
+        selectEntity(entity)
+    end
+    selectEntity(104, "otherView")
+    selectEntity(104, "mainView", "select-world")
+    assertEqual(#events, 1, "ignore unrelated selections and avoid duplicate construction windows")
+    for _, invalidEntity in ipairs({ "104", 104.5 }) do
+        local ok, message = pcall(selectEntity, invalidEntity)
+        assertEqual(ok, false, "invalid selection entity is rejected")
+        assert(tostring(message):find("requires an integer entity ID", 1, true), tostring(message))
+    end
+    descriptions[params.constructionFileName].entityWindowScript.fileName = ""
+    local ok, message = pcall(selectEntity, 104)
+    assertEqual(ok, false, "missing Zigzag window hook is rejected")
+    assert(tostring(message):find("has no station window script", 1, true), tostring(message))
+    descriptions[params.constructionFileName].entityWindowScript.fileName = windowScriptName
+    components[101].CONSTRUCTION = nil
+    ok, message = pcall(selectEntity, 104)
+    assertEqual(ok, false, "inconsistent track ownership is rejected")
+    assert(tostring(message):find("owner has no construction component", 1, true), tostring(message))
+    assertEqual(#events, 1, "invalid selections never open a window")
+    _G.api = nil
+end
 
 local templateAttributes = construction.constructionTemplates[1].description.attributes
 assertEqual(templateAttributes.cost[1], 0, "unconfigured minimum displayed cost")

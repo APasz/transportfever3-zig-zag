@@ -8,7 +8,9 @@ local logging = ug_require(
 local COST_MODE_PARAM_KEY = "apasz_zigzag_costs_enabled"
 local DEFAULT_COST_MODE_INDEX = 3
 local MAX_CAPTURE_PARAM_DEPTH = 16
-local ZIGZAG_CONSTRUCTION_PATH = "::/stations/rail/zigzag/zigzag.con"
+local ZIGZAG_CONSTRUCTION_PATH = ug_require(
+"apasz_zigzag::/zigzag/construction_path.lua")
+
 local PASSENGER_PLATFORM_PATH_PREFIX =
 "::/stations/rail/modular_station/platform_passenger_era_"
 local CARGO_PLATFORM_PATH_PREFIX =

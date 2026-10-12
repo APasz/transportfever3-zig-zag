@@ -23,19 +23,24 @@ A platform-free railway station for reversing trains and building switchback or 
 - Track upgrades derive and persist the selected template's electric capability, including
   third-rail and other always-electric tracks.
 - A dedicated zigzag menu icon, rather than the vanilla passenger-station placeholder.
+- The vanilla station window opens on selection, with title renaming and stopping lines.
 - Localised construction text for every language shipped with Transport Fever 3.
 
 The station does not explicitly command a train to reverse. Transport Fever's route solver reverses the train when the next leg of its line requires departure in the opposite direction.
 
 ## Development
 
-Generate runtime Lua and run the structural tests with:
+Generate runtime Lua and run the regression tests with:
 
 ```sh
 tl gen -c -o content/mod.script.lua src/mod.script.tl
 tl gen -c -o content/zigzag/logging_config.lua src/zigzag/logging_config.tl
+tl gen -c -o content/zigzag/construction_path.lua src/zigzag/construction_path.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.con.lua src/stations/rail/zigzag/zigzag.con.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.params.gui.lua src/stations/rail/zigzag/zigzag.params.gui.tl
+tl gen -c -o content/stations/rail/zigzag/zigzag.window.script.lua src/stations/rail/zigzag/zigzag.window.script.tl
+tl gen -c -o content/stations/rail/zigzag/zigzag.selection.gs.lua src/stations/rail/zigzag/zigzag.selection.gs.tl
+tl gen -c -o content/stations/rail/zigzag/zigzag.selection.script.lua src/stations/rail/zigzag/zigzag.selection.script.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.script.lua src/stations/rail/zigzag/zigzag.script.tl
 lua tests/zigzag_check.lua
 ```
@@ -45,6 +50,16 @@ with `apasz_zigzag_` to avoid collisions with other mods.
 
 Runtime logging uses the shared `_logging` module. Debug logging is disabled by default in
 `src/zigzag/logging_config.tl`.
+
+Selecting a frozen Zigzag track forwards the native selection event to its owning construction.
+The construction's window hook then supplies vanilla station-group content and renames the
+construction name stem. The selection game script must be loaded by reloading the save after
+updating the mod.
+
+The window tests cover callback loading through `data()`, track-selection forwarding,
+generated construction names, native station content, and the construction rename target.
+For in-game verification, check existing and newly placed stations, rename persistence after
+reloading, stopping lines on each terminal, and ordinary track selection.
 
 Passenger and cargo loading are disabled by default. The non-loading terminal uses an invisible,
 non-linkable `PERSON` lane. TpF3 requires every terminal's `personEdges` to resolve unambiguously

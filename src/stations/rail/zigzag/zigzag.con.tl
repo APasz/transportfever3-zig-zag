@@ -161,6 +161,9 @@ function data(): any
                 heightmapContours = true,
             },
         },
+        entityWindowScript = {
+            fileName = "zigzag.window.script@entityWindowFn",
+        },
         namePrefix = _(STATION_NAME_PREFIX_KEY),
         subConstructionNamePrefix = "{constructionName}",
         description = {

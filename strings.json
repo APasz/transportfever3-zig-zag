@@ -2,7 +2,7 @@
     "en": {
         "apasz_zigzag_name": "Zigzag Station",
         "apasz_zigzag_description": "Platform-free rail stop for reversing trains and switchback lines.",
-        "apasz_zigzag_name_prefix": "{townName} Zigzag Station",
+        "apasz_zigzag_name_prefix": "{townName} Zigzag",
         "apasz_zigzag_length": "Length",
         "apasz_zigzag_tracks": "Tracks",
         "apasz_zigzag_track_spacing": "Track spacing",
@@ -22,7 +22,7 @@
     "de": {
         "apasz_zigzag_name": "Spitzkehrenbahnhof",
         "apasz_zigzag_description": "Bahnsteigloser Bahnhalt zum Wenden von Zügen und für Spitzkehrenstrecken.",
-        "apasz_zigzag_name_prefix": "{townName} Spitzkehrenbahnhof",
+        "apasz_zigzag_name_prefix": "{townName} Spitzkehre",
         "apasz_zigzag_length": "Länge",
         "apasz_zigzag_tracks": "Gleise",
         "apasz_zigzag_track_spacing": "Gleisabstand",
@@ -42,7 +42,7 @@
     "es": {
         "apasz_zigzag_name": "Estación en zigzag",
         "apasz_zigzag_description": "Parada ferroviaria sin andén para invertir la marcha de los trenes y crear líneas en zigzag.",
-        "apasz_zigzag_name_prefix": "Estación en zigzag de {townName}",
+        "apasz_zigzag_name_prefix": "Zigzag de {townName}",
         "apasz_zigzag_length": "Longitud",
         "apasz_zigzag_tracks": "Vías",
         "apasz_zigzag_track_spacing": "Separación entre vías",
@@ -62,7 +62,7 @@
     "fr": {
         "apasz_zigzag_name": "Gare en zigzag",
         "apasz_zigzag_description": "Arrêt ferroviaire sans quai permettant aux trains de rebrousser et destiné aux lignes en zigzag.",
-        "apasz_zigzag_name_prefix": "Gare en zigzag de {townName}",
+        "apasz_zigzag_name_prefix": "Zigzag de {townName}",
         "apasz_zigzag_length": "Longueur",
         "apasz_zigzag_tracks": "Voies",
         "apasz_zigzag_track_spacing": "Espacement des voies",
@@ -82,7 +82,7 @@
     "it": {
         "apasz_zigzag_name": "Stazione a zig-zag",
         "apasz_zigzag_description": "Fermata ferroviaria senza marciapiede per l'inversione dei treni e le linee a tornanti.",
-        "apasz_zigzag_name_prefix": "Stazione a zig-zag di {townName}",
+        "apasz_zigzag_name_prefix": "Zig-zag di {townName}",
         "apasz_zigzag_length": "Lunghezza",
         "apasz_zigzag_tracks": "Binari",
         "apasz_zigzag_track_spacing": "Distanza tra i binari",
@@ -102,7 +102,7 @@
     "ja": {
         "apasz_zigzag_name": "スイッチバック駅",
         "apasz_zigzag_description": "列車の折り返しやスイッチバック路線に使用する、ホームのない鉄道停車地点です。",
-        "apasz_zigzag_name_prefix": "{townName}スイッチバック駅",
+        "apasz_zigzag_name_prefix": "{townName}スイッチバック",
         "apasz_zigzag_length": "長さ",
         "apasz_zigzag_tracks": "線路数",
         "apasz_zigzag_track_spacing": "線路間隔",
@@ -122,7 +122,7 @@
     "ko": {
         "apasz_zigzag_name": "스위치백역",
         "apasz_zigzag_description": "열차 회차 및 스위치백 노선을 위한 승강장 없는 철도 정차 지점입니다.",
-        "apasz_zigzag_name_prefix": "{townName} 스위치백역",
+        "apasz_zigzag_name_prefix": "{townName} 스위치백",
         "apasz_zigzag_length": "길이",
         "apasz_zigzag_tracks": "선로 수",
         "apasz_zigzag_track_spacing": "선로 간격",
@@ -142,7 +142,7 @@
     "nl": {
         "apasz_zigzag_name": "Zigzagstation",
         "apasz_zigzag_description": "Perronloze spoorhalte voor het keren van treinen en zigzagspoorlijnen.",
-        "apasz_zigzag_name_prefix": "{townName} Zigzagstation",
+        "apasz_zigzag_name_prefix": "{townName} Zigzag",
         "apasz_zigzag_length": "Lengte",
         "apasz_zigzag_tracks": "Sporen",
         "apasz_zigzag_track_spacing": "Spoorafstand",
@@ -162,7 +162,7 @@
     "pl": {
         "apasz_zigzag_name": "Stacja zygzakowa",
         "apasz_zigzag_description": "Przystanek kolejowy bez peronu do zmiany kierunku jazdy pociągów i budowy linii zygzakowych.",
-        "apasz_zigzag_name_prefix": "{townName} – stacja zygzakowa",
+        "apasz_zigzag_name_prefix": "{townName} – zygzak",
         "apasz_zigzag_length": "Długość",
         "apasz_zigzag_tracks": "Tory",
         "apasz_zigzag_track_spacing": "Rozstaw torów",
@@ -182,7 +182,7 @@
     "pt_BR": {
         "apasz_zigzag_name": "Estação em zigue-zague",
         "apasz_zigzag_description": "Parada ferroviária sem plataforma para reversão de trens e linhas em zigue-zague.",
-        "apasz_zigzag_name_prefix": "Estação em zigue-zague de {townName}",
+        "apasz_zigzag_name_prefix": "Zigue-zague de {townName}",
         "apasz_zigzag_length": "Comprimento",
         "apasz_zigzag_tracks": "Vias",
         "apasz_zigzag_track_spacing": "Espaçamento entre vias",
@@ -202,7 +202,7 @@
     "ru": {
         "apasz_zigzag_name": "Зигзагообразная станция",
         "apasz_zigzag_description": "Железнодорожная остановка без платформы для смены направления движения поездов и зигзагообразных линий.",
-        "apasz_zigzag_name_prefix": "{townName} — зигзагообразная станция",
+        "apasz_zigzag_name_prefix": "{townName} — зигзаг",
         "apasz_zigzag_length": "Длина",
         "apasz_zigzag_tracks": "Пути",
         "apasz_zigzag_track_spacing": "Расстояние между путями",
@@ -222,7 +222,7 @@
     "zh_CN": {
         "apasz_zigzag_name": "折返站",
         "apasz_zigzag_description": "无站台的铁路停车点，用于列车折返和之字形铁路。",
-        "apasz_zigzag_name_prefix": "{townName}折返站",
+        "apasz_zigzag_name_prefix": "{townName}折返",
         "apasz_zigzag_length": "长度",
         "apasz_zigzag_tracks": "轨道数",
         "apasz_zigzag_track_spacing": "轨道间距",
@@ -242,7 +242,7 @@
     "zh_TW": {
         "apasz_zigzag_name": "折返站",
         "apasz_zigzag_description": "無月台的鐵路停靠點，用於列車折返和之字形鐵路。",
-        "apasz_zigzag_name_prefix": "{townName}折返站",
+        "apasz_zigzag_name_prefix": "{townName}折返",
         "apasz_zigzag_length": "長度",
         "apasz_zigzag_tracks": "軌道數",
         "apasz_zigzag_track_spacing": "軌道間距",
