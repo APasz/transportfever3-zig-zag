@@ -6,26 +6,28 @@
     "options": null,
     "params": [
         {
-            "defaultIndex": 1,
+            "defaultIndex": 2,
             "key": "apasz_zigzag_costs_enabled",
             "name": "apasz_zigzag_costs_enabled",
             "tooltip": "apasz_zigzag_costs_enabled_tooltip",
-            "uiType": "CheckBox",
+            "uiType": "ComboBox",
             "values": [
-                "apasz_zigzag_off",
-                "apasz_zigzag_on"
+                "apasz_zigzag_cost_mode_none",
+                "apasz_zigzag_cost_mode_track",
+                "apasz_zigzag_cost_mode_module",
+                "apasz_zigzag_cost_mode_station"
             ]
         }
     ],
     "postRunScript": {
-        "fileName": ""
+        "fileName": "apasz_zigzag::/mod.script@postRunFn"
     },
     "preRunScript": {
         "fileName": ""
     },
-    "revision": 2,
+    "revision": 3,
     "runScript": {
-        "fileName": "apasz_zigzag::/mod.script@runFn"
+        "fileName": ""
     },
     "severityAdd": "None",
     "severityRemove": "Warning"

@@ -23,11 +23,10 @@ local DEFAULT_PASSENGER_CAPACITY_MULTIPLIER = 1
 local DEFAULT_TRACK_TYPE_INDEX = 2
 local LOADING_DISABLED_INDEX = 1
 local LOADING_ENABLED_INDEX = 2
+local MODULE_LENGTH_METRES = 40
 local PASSENGER_LOADING_PARAM_KEY = "passengerLoadingEnabled"
 local CARGO_LOADING_PARAM_KEY = "cargoLoadingEnabled"
 local LOADING_VISIBILITY_SCRIPT = "zigzag.params.gui@checkLoadingVisibility"
-local COST_PER_METRE = 750
-local MAINTENANCE_COST_PER_METRE = 12.5
 local ICON_FILE = "zigzag.tga"
 local PREVIEW_ICON_FILE = "zigzag_preview.tga"
 local STATION_NAME_KEY = "apasz_zigzag_name"
@@ -135,18 +134,8 @@ local function makeTemplates()
             icon = ICON_FILE,
             previewIcon = PREVIEW_ICON_FILE,
             attributes = {
-               maintenanceCost = {
-                  LENGTHS_METRES[1] * MAINTENANCE_COST_PER_METRE,
-                  LENGTHS_METRES[#LENGTHS_METRES] *
-                  TRACK_COUNTS[#TRACK_COUNTS] *
-                  MAINTENANCE_COST_PER_METRE,
-               },
-               cost = {
-                  LENGTHS_METRES[1] * COST_PER_METRE,
-                  LENGTHS_METRES[#LENGTHS_METRES] *
-                  TRACK_COUNTS[#TRACK_COUNTS] *
-                  COST_PER_METRE,
-               },
+               maintenanceCost = { 0, 0 },
+               cost = { 0, 0 },
             },
          },
          data = {
@@ -207,8 +196,10 @@ function data()
             defaultTrackTypeIndex = DEFAULT_TRACK_TYPE_INDEX,
             loadingDisabledIndex = LOADING_DISABLED_INDEX,
             loadingEnabledIndex = LOADING_ENABLED_INDEX,
-            costPerMetre = COST_PER_METRE,
-            maintenanceCostPerMetre = MAINTENANCE_COST_PER_METRE,
+            moduleLengthMetres = MODULE_LENGTH_METRES,
+            costMode = "MODULE_COST",
+            trackCostProfiles = {},
+            platformCostProfiles = {},
          },
       },
       upgradeScript = {

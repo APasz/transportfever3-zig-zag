@@ -22,7 +22,6 @@ local SERVICE_LANE_OFFSET_METRES: number = 0.5
 local ACCESS_LANE_WIDTH_METRES: number = 1
 local ACCESS_EXTENSION_METRES: number = 10
 local PASSENGER_CAPACITY_PER_METRE: number = 1.7
-
 local type Vector3 = {number, number, number}
 local type EdgeNode = {Vector3, Vector3}
 local type IndexPair = {integer, integer}
@@ -42,8 +41,10 @@ local record CapturedParams
     defaultTrackTypeIndex: integer
     loadingDisabledIndex: integer
     loadingEnabledIndex: integer
-    costPerMetre: number
-    maintenanceCostPerMetre: number
+    moduleLengthMetres: integer
+    costMode: ZigzagCostMode
+    trackCostProfiles: {string: ZigzagTrackCostProfile}
+    platformCostProfiles: {ZigzagPlatformCostProfile}
 end
 
 local record UpgradeCapturedParams
@@ -64,6 +65,7 @@ local record ConstructionParams
     trackType: integer | nil
     catenary: integer | nil
     streetTemplate: string | nil
+    year: integer | nil
 end
 
 local record ConstructionConfig
@@ -133,6 +135,105 @@ local record UpdateResult
     subconstructions: {StationSubconstruction}
     cost: number
     maintenanceCost: number
+end
+
+local function addCost(
+    total: ZigzagCostRate,
+    rate: ZigzagCostRate,
+    quantity: number
+)
+    total.construction = total.construction + rate.construction * quantity
+    total.maintenance = total.maintenance + rate.maintenance * quantity
+end
+
+local function requireTrackCostProfile(
+    captureParams: CapturedParams,
+    trackType: string
+): ZigzagTrackCostProfile
+    local profile = captureParams.trackCostProfiles[trackType]
+    if profile == nil then
+        error("Zigzag Station has no cost profile for track " .. trackType)
+    end
+    return profile
+end
+
+local function requirePlatformCostProfile(
+    captureParams: CapturedParams,
+    year: integer
+): ZigzagPlatformCostProfile
+    local selectedProfile: ZigzagPlatformCostProfile | nil = nil
+    for _, profile in ipairs(captureParams.platformCostProfiles) do
+        if profile.yearFrom <= year then
+            if selectedProfile == nil
+                or profile.yearFrom
+                    > (selectedProfile as ZigzagPlatformCostProfile).yearFrom
+            then
+                selectedProfile = profile
+            end
+        end
+    end
+    if selectedProfile == nil then
+        error("Zigzag Station has no platform cost profile for year " .. tostring(year))
+    end
+    return selectedProfile
+end
+
+local function calculateCosts(
+    captureParams: CapturedParams,
+    params: ConstructionParams,
+    length: integer,
+    trackCount: integer,
+    trackType: string,
+    passengerLoadingEnabled: boolean,
+    cargoLoadingEnabled: boolean
+): ZigzagCostRate
+    local mode = captureParams.costMode
+    if mode == "NO_COST" then
+        return { construction = 0, maintenance = 0 }
+    end
+
+    local profile = requireTrackCostProfile(captureParams, trackType)
+    local total: ZigzagCostRate = { construction = 0, maintenance = 0 }
+    if mode == "TRACK_COST" then
+        local trackRate = profile.perMetre
+        if trackRate == nil then
+            error("Zigzag Station has no per-metre cost for track " .. trackType)
+        end
+        addCost(total, trackRate, length * trackCount)
+        return total
+    end
+    if mode ~= "MODULE_COST" and mode ~= "STATION_COST" then
+        error("Zigzag Station received invalid cost mode " .. tostring(mode))
+    end
+
+    local trackModuleRate = profile.perModule
+    if trackModuleRate == nil then
+        error("Zigzag Station has no generated module cost for track " .. trackType)
+    end
+    if captureParams.moduleLengthMetres <= 0 then
+        error("Zigzag Station requires a positive module length")
+    end
+    local moduleCountAlongLength = length / captureParams.moduleLengthMetres
+    addCost(total, trackModuleRate, moduleCountAlongLength * trackCount)
+
+    if mode == "STATION_COST"
+        and (passengerLoadingEnabled or cargoLoadingEnabled)
+    then
+        local platformProfile = requirePlatformCostProfile(
+            captureParams,
+            params.year or 0
+        )
+        local platformRows = math.floor(trackCount / 2) + 1
+        local platformModuleCount = moduleCountAlongLength * platformRows
+        if passengerLoadingEnabled then
+            addCost(total, platformProfile.passenger, platformModuleCount)
+        end
+        if cargoLoadingEnabled then
+            addCost(total, platformProfile.cargo, platformModuleCount)
+        end
+    end
+
+    return total
 end
 
 local function requireAllowedValue<T>(
@@ -843,6 +944,15 @@ local function updateFn(captureParams: CapturedParams, params: ConstructionParam
         catenaryEnabled
     )
     local transportModes = makeTrackTransportModes(catenaryEnabled)
+    local costs = calculateCosts(
+        captureParams,
+        params,
+        length,
+        trackCount,
+        trackType,
+        passengerLoadingEnabled,
+        cargoLoadingEnabled
+    )
     return {
         edgeLists = {
             makeTrackEdgeList(
@@ -864,8 +974,8 @@ local function updateFn(captureParams: CapturedParams, params: ConstructionParam
                 transportModes
             ),
         },
-        cost = length * trackCount * captureParams.costPerMetre,
-        maintenanceCost = length * trackCount * captureParams.maintenanceCostPerMetre,
+        cost = costs.construction,
+        maintenanceCost = costs.maintenance,
     }
 end
 

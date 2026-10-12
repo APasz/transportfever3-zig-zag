@@ -14,7 +14,9 @@ A platform-free railway station for reversing trains and building switchback or 
 - Adjustable lengths of 5, 10, and 20 metres, then 40-metre steps through 440 metres;
   10 metres is the default.
 - Adjustable track spacing from 3 to 20 metres, in one-metre steps, with 5 metres as the default.
-- Optional mod setting to disable both construction and maintenance costs; costs remain enabled by default.
+- Four construction and maintenance cost models: no cost, selected-track cost, equivalent
+  vanilla track-module cost, or track-module cost plus matching passenger/cargo platforms.
+  New games default to module cost; old Off/On configurations migrate to No Cost/Track Cost.
 - Vanilla track type, high-speed track, and catenary options during construction.
 - Compatible track mods can be applied afterwards with the normal track-upgrade tool.
 - Track upgrades apply to every track in a Zigzag Station together.

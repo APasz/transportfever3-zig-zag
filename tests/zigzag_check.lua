@@ -216,7 +216,13 @@ end
 local TRAIN_MODE = "TRAIN"
 local ELECTRIC_TRAIN_MODE = "ELECTRIC_TRAIN"
 
-local function makeTrackTemplate(electrified, catenaryAdd, catenaryRemove)
+local function makeTrackTemplate(
+    electrified,
+    catenaryAdd,
+    catenaryRemove,
+    constructionCost,
+    maintenanceCost
+)
     local transportModes = {
         [TRAIN_MODE] = true,
     }
@@ -232,24 +238,50 @@ local function makeTrackTemplate(electrified, catenaryAdd, catenaryRemove)
         },
         catenaryAdd = catenaryAdd,
         catenaryRemove = catenaryRemove,
+        cost = constructionCost,
+        maintenanceCost = maintenanceCost,
     }
 end
 
 local templates = {
-    ["standard.track"] = makeTrackTemplate(false, "standard_catenary.track", nil),
-    ["standard_catenary.track"] = makeTrackTemplate(true, nil, "standard.track"),
-    ["high_speed.track"] = makeTrackTemplate(false, "high_speed_catenary.track", nil),
-    ["high_speed_catenary.track"] = makeTrackTemplate(true, nil, "high_speed.track"),
-    ["custom.track"] = makeTrackTemplate(false, "custom_catenary.track", nil),
-    ["custom_catenary.track"] = makeTrackTemplate(true, nil, "custom.track"),
-    ["third_rail.track"] = makeTrackTemplate(true, nil, nil),
-    ["unpowered_unpaired.track"] = makeTrackTemplate(false, nil, nil),
-    ["broken_catenary_pair.track"] = makeTrackTemplate(false, "road.street", nil),
+    ["standard.track"] = makeTrackTemplate(false, "standard_catenary.track", nil, 180, 30),
+    ["standard_catenary.track"] = makeTrackTemplate(true, nil, "standard.track", 180, 30),
+    ["high_speed.track"] = makeTrackTemplate(false, "high_speed_catenary.track", nil, 540, 90),
+    ["high_speed_catenary.track"] = makeTrackTemplate(true, nil, "high_speed.track", 540, 90),
+    ["custom.track"] = makeTrackTemplate(false, "custom_catenary.track", nil, 250, 40),
+    ["custom_catenary.track"] = makeTrackTemplate(true, nil, "custom.track", 275, 45),
+    ["third_rail.track"] = makeTrackTemplate(true, nil, nil, 300, 50),
+    ["unpowered_unpaired.track"] = makeTrackTemplate(false, nil, nil, 120, 20),
+    ["broken_catenary_pair.track"] = makeTrackTemplate(false, "road.street", nil, 90, 15),
+    ["other_mod::/modded.track"] = makeTrackTemplate(false, nil, nil, 225, 35),
+    ["zero_cost.track"] = makeTrackTemplate(false, nil, nil, 0, 0),
+    ["malformed_module.track"] = makeTrackTemplate(false, nil, nil, 210, 31),
+    ["::/industries/shared/industry_track/industry.street_template"] =
+        makeTrackTemplate(false, nil, nil, 0, nil),
     ["road.street"] = {
         roadType = 1,
         laneConfigs = {},
     },
 }
+
+local activeInfrastructureCostScale = 1
+local activeInfrastructureMaintenanceScale = 1
+
+local function scaledTrackTemplate(resourceName)
+    local template = assert(templates[resourceName], "unknown template " .. tostring(resourceName))
+    local scaledTemplate = {}
+    for key, value in pairs(template) do
+        scaledTemplate[key] = value
+    end
+    if type(scaledTemplate.cost) == "number" then
+        scaledTemplate.cost = scaledTemplate.cost * activeInfrastructureCostScale
+    end
+    if type(scaledTemplate.maintenanceCost) == "number" then
+        scaledTemplate.maintenanceCost = scaledTemplate.maintenanceCost
+            * activeInfrastructureMaintenanceScale
+    end
+    return scaledTemplate
+end
 
 local gameApi = {
     type = {
@@ -269,7 +301,7 @@ local gameApi = {
                 return resourceName
             end,
             get = function(resourceName)
-                return assert(templates[resourceName], "unknown template " .. tostring(resourceName))
+                return scaledTrackTemplate(resourceName)
             end,
             findAndGet = function(resourceName)
                 return assert(templates[resourceName], "unknown template " .. tostring(resourceName))
@@ -521,14 +553,10 @@ assertEqual(
 )
 
 local templateAttributes = construction.constructionTemplates[1].description.attributes
-assertEqual(templateAttributes.cost[1], 5 * 750, "minimum displayed cost")
-assertEqual(templateAttributes.cost[2], 440 * 8 * 750, "maximum displayed cost")
-assertEqual(templateAttributes.maintenanceCost[1], 5 * 12.5, "minimum displayed maintenance")
-assertEqual(
-    templateAttributes.maintenanceCost[2],
-    440 * 8 * 12.5,
-    "maximum displayed maintenance"
-)
+assertEqual(templateAttributes.cost[1], 0, "unconfigured minimum displayed cost")
+assertEqual(templateAttributes.cost[2], 0, "unconfigured maximum displayed cost")
+assertEqual(templateAttributes.maintenanceCost[1], 0, "unconfigured minimum displayed maintenance")
+assertEqual(templateAttributes.maintenanceCost[2], 0, "unconfigured maximum displayed maintenance")
 
 local iconWidth, iconHeight = readTgaSize(
     "content/stations/rail/zigzag/zigzag@2x.tga"
@@ -546,7 +574,63 @@ local script = loadData("content/stations/rail/zigzag/zigzag.script.lua")
 assertEqual(type(script.createTemplateFn), "function", "template callback")
 assertEqual(next(script.createTemplateFn({}, {})), nil, "empty initial module set")
 local captureParams = construction.updateScript.params
+local moduleCostRates = {
+    ["standard.track"] = { construction = 80000, maintenance = 8000 },
+    ["standard_catenary.track"] = { construction = 90000, maintenance = 9000 },
+    ["high_speed.track"] = { construction = 120000, maintenance = 12000 },
+    ["high_speed_catenary.track"] = { construction = 130000, maintenance = 13000 },
+    ["custom.track"] = { construction = 100000, maintenance = 10000 },
+    ["custom_catenary.track"] = { construction = 110000, maintenance = 11000 },
+    ["third_rail.track"] = { construction = 115000, maintenance = 11500 },
+    ["unpowered_unpaired.track"] = { construction = 70000, maintenance = 7000 },
+    ["broken_catenary_pair.track"] = { construction = 60000, maintenance = 6000 },
+    ["other_mod::/modded.track"] = { construction = 95000, maintenance = 9500 },
+    ["::/industries/shared/industry_track/industry.street_template"] = {
+        construction = 50000,
+        maintenance = 5000,
+    },
+}
+captureParams.trackCostProfiles = {}
+for resourceName, template in pairs(templates) do
+    if template.roadType == gameApi.type["enum"].RoadType.TRACK then
+        local perMetre = nil
+        if type(template.cost) == "number"
+            and type(template.maintenanceCost) == "number"
+        then
+            perMetre = {
+                construction = template.cost,
+                maintenance = template.maintenanceCost,
+            }
+        end
+        local perModule = moduleCostRates[resourceName]
+        if perMetre ~= nil or perModule ~= nil then
+            captureParams.trackCostProfiles[resourceName] = {
+                perMetre = perMetre,
+                perModule = perModule,
+            }
+        end
+    end
+end
+captureParams.platformCostProfiles = {
+    {
+        yearFrom = 0,
+        passenger = { construction = 60000, maintenance = 10000 },
+        cargo = { construction = 30000, maintenance = 5000 },
+    },
+    {
+        yearFrom = 1950,
+        passenger = { construction = 90000, maintenance = 15000 },
+        cargo = { construction = 45000, maintenance = 7500 },
+    },
+    {
+        yearFrom = 1990,
+        passenger = { construction = 120000, maintenance = 20000 },
+        cargo = { construction = 60000, maintenance = 10000 },
+    },
+}
 assertEqual(captureParams.defaultLengthMetres, 10, "captured default length")
+assertEqual(captureParams.moduleLengthMetres, 40, "captured vanilla module length")
+assertEqual(captureParams.costMode, "MODULE_COST", "captured default cost mode")
 for index, lengthMetres in ipairs(expectedLegacyLengthsMetres) do
     assertEqual(
         captureParams.legacyLengthsMetres[index],
@@ -614,12 +698,12 @@ local function assertLengthResult(params, lengthMetres, context)
     )
     assertEqual(
         lengthResult.cost,
-        lengthMetres * captureParams.costPerMetre,
+        lengthMetres / 40 * moduleCostRates["standard.track"].construction,
         "cost for " .. context
     )
     assertEqual(
         lengthResult.maintenanceCost,
-        lengthMetres * captureParams.maintenanceCostPerMetre,
+        lengthMetres / 40 * moduleCostRates["standard.track"].maintenance,
         "maintenance cost for " .. context
     )
 end
@@ -664,12 +748,12 @@ for trackCountIndex, trackCount in ipairs(expectedTrackCounts) do
     )
     assertEqual(
         trackCountResult.cost,
-        10 * trackCount * captureParams.costPerMetre,
+        10 / 40 * trackCount * moduleCostRates["standard.track"].construction,
         "cost for track count " .. trackCount
     )
     assertEqual(
         trackCountResult.maintenanceCost,
-        10 * trackCount * captureParams.maintenanceCostPerMetre,
+        10 / 40 * trackCount * moduleCostRates["standard.track"].maintenance,
         "maintenance cost for track count " .. trackCount
     )
 
@@ -808,8 +892,235 @@ assertEqual(#station.catchmentAreas, 0, "catchment area count")
 assertEqual(#station.pool.edges, 0, "station pool edge count")
 assertEqual(station.pool.capacity, 0, "station pool capacity")
 assertEqual(result.snapPoint, nil, "edge nodes are the only placement snap source")
-assertEqual(result.cost, 7500, "construction cost")
-assertEqual(result.maintenanceCost, 125, "maintenance cost")
+assertEqual(result.cost, 20000, "default module construction cost")
+assertEqual(result.maintenanceCost, 2000, "default module maintenance cost")
+
+local function captureWithCostMode(costMode)
+    local configuredCapture = {}
+    for key, value in pairs(captureParams) do
+        configuredCapture[key] = value
+    end
+    configuredCapture.costMode = costMode
+    return configuredCapture
+end
+
+local noCostResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("NO_COST"),
+    {
+        tracks = 8,
+        lengthMetres = 440,
+        passengerLoadingEnabled = 2,
+        cargoLoadingEnabled = 2,
+    }
+)
+assertEqual(noCostResult.cost, 0, "no-cost construction cost")
+assertEqual(noCostResult.maintenanceCost, 0, "no-cost maintenance cost")
+assertEqual(#noCostResult.edgeLists[1].edges, 8 * nodesPerTrack, "no-cost geometry")
+
+local trackCostResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("TRACK_COST"),
+    {
+        tracks = 3,
+        lengthMetres = 40,
+        streetTemplate = "custom.track",
+        catenary = 1,
+    }
+)
+assertEqual(trackCostResult.cost, 40 * 3 * 250, "selected track construction cost")
+assertEqual(
+    trackCostResult.maintenanceCost,
+    40 * 3 * 40,
+    "selected track maintenance cost"
+)
+
+local zeroTrackCostResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("TRACK_COST"),
+    {
+        lengthMetres = 40,
+        streetTemplate = "zero_cost.track",
+        catenary = 1,
+    }
+)
+assertEqual(zeroTrackCostResult.cost, 0, "explicit zero track construction cost")
+assertEqual(zeroTrackCostResult.maintenanceCost, 0, "explicit zero track maintenance cost")
+
+local proportionalModuleResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("MODULE_COST"),
+    {
+        lengthMetres = 5,
+        streetTemplate = "custom.track",
+        catenary = 1,
+    }
+)
+assertEqual(proportionalModuleResult.cost, 100000 / 8, "proportional module construction cost")
+assertEqual(
+    proportionalModuleResult.maintenanceCost,
+    10000 / 8,
+    "proportional module maintenance cost"
+)
+
+local stationPassengerResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("STATION_COST"),
+    {
+        lengthMetres = 40,
+        passengerLoadingEnabled = 2,
+        year = 1949,
+    }
+)
+assertEqual(
+    stationPassengerResult.cost,
+    80000 + 60000,
+    "one-track passenger station construction cost"
+)
+assertEqual(
+    stationPassengerResult.maintenanceCost,
+    8000 + 10000,
+    "one-track passenger station maintenance cost"
+)
+
+local stationBothResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("STATION_COST"),
+    {
+        tracks = 3,
+        lengthMetres = 40,
+        passengerLoadingEnabled = 2,
+        cargoLoadingEnabled = 2,
+        year = 1949,
+    }
+)
+assertEqual(
+    stationBothResult.cost,
+    3 * 80000 + 2 * (60000 + 30000),
+    "station cost uses vanilla platform rows and both loading types"
+)
+assertEqual(
+    stationBothResult.maintenanceCost,
+    3 * 8000 + 2 * (10000 + 5000),
+    "station maintenance uses vanilla platform rows and both loading types"
+)
+
+local eraStationResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("STATION_COST"),
+    {
+        lengthMetres = 40,
+        passengerLoadingEnabled = 2,
+        cargoLoadingEnabled = 2,
+        year = 1950,
+    }
+)
+assertEqual(
+    eraStationResult.cost,
+    80000 + 90000 + 45000,
+    "station cost uses the current platform era"
+)
+assertEqual(
+    eraStationResult.maintenanceCost,
+    8000 + 15000 + 7500,
+    "station maintenance uses the current platform era"
+)
+
+local proportionalStationResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("STATION_COST"),
+    {
+        lengthMetres = 10,
+        passengerLoadingEnabled = 2,
+        year = 0,
+    }
+)
+assertEqual(
+    proportionalStationResult.cost,
+    (80000 + 60000) / 4,
+    "sub-module station construction cost is proportional"
+)
+assertEqual(
+    proportionalStationResult.maintenanceCost,
+    (8000 + 10000) / 4,
+    "sub-module station maintenance cost is proportional"
+)
+
+local stationWithoutLoadingResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("STATION_COST"),
+    { tracks = 4, lengthMetres = 40 }
+)
+assertEqual(
+    stationWithoutLoadingResult.cost,
+    4 * 80000,
+    "station cost without loading matches module cost"
+)
+
+local fourTrackPassengerResult = runRestrictedUpdateWithCapture(
+    captureWithCostMode("STATION_COST"),
+    {
+        tracks = 4,
+        lengthMetres = 40,
+        passengerLoadingEnabled = 2,
+        year = 0,
+    }
+)
+assertEqual(
+    fourTrackPassengerResult.cost,
+    4 * 80000 + 3 * 60000,
+    "four tracks use three vanilla platform rows"
+)
+
+local invalidCostModeOk = pcall(
+    script.updateFn,
+    captureWithCostMode("INVALID_COST_MODE"),
+    {}
+)
+assertEqual(invalidCostModeOk, false, "invalid captured cost mode rejection")
+
+local missingTrackModuleCapture = captureWithCostMode("MODULE_COST")
+missingTrackModuleCapture.trackCostProfiles = {}
+for resourceName, profile in pairs(captureParams.trackCostProfiles) do
+    missingTrackModuleCapture.trackCostProfiles[resourceName] = profile
+end
+missingTrackModuleCapture.trackCostProfiles["custom.track"] = {
+    perMetre = captureParams.trackCostProfiles["custom.track"].perMetre,
+    perModule = nil,
+}
+local missingTrackModuleOk, missingTrackModuleError = pcall(
+    script.updateFn,
+    missingTrackModuleCapture,
+    {
+        streetTemplate = "custom.track",
+        catenary = 1,
+    }
+)
+assertEqual(missingTrackModuleOk, false, "missing generated track-module cost rejection")
+assertEqual(
+    string.find(
+        tostring(missingTrackModuleError),
+        "no generated module cost for track custom.track",
+        1,
+        true
+    ) ~= nil,
+    true,
+    "missing generated track-module error context"
+)
+
+local missingPerMetreCapture = captureWithCostMode("TRACK_COST")
+local incompleteTrackName =
+    "::/industries/shared/industry_track/industry.street_template"
+local missingPerMetreOk, missingPerMetreError = pcall(
+    script.updateFn,
+    missingPerMetreCapture,
+    {
+        streetTemplate = incompleteTrackName,
+        catenary = 1,
+    }
+)
+assertEqual(missingPerMetreOk, false, "missing per-metre track cost rejection")
+assertEqual(
+    string.find(
+        tostring(missingPerMetreError),
+        "no per-metre cost for track " .. incompleteTrackName,
+        1,
+        true
+    ) ~= nil,
+    true,
+    "missing per-metre track cost error context"
+)
 
 local loadingResult = runRestrictedUpdate({
     tracks = 2,
@@ -1147,6 +1458,11 @@ for _, customTrackTerminal in ipairs(customTrackResult.subconstructions[1].stati
         "non-electrified custom-track terminal mode count"
     )
 end
+assertEqual(
+    customTrackResult.cost,
+    10 / 40 * 3 * 100000,
+    "custom track uses its generated module cost"
+)
 
 local thirdRailResult = runRestrictedUpdate({
     length = 1,
@@ -1165,6 +1481,11 @@ local catenaryResult = runRestrictedUpdate({
     catenary = 2,
 })
 assertEqual(catenaryResult.edgeLists[1].params.type, "high_speed_catenary.track", "catenary track")
+assertEqual(
+    catenaryResult.cost,
+    10 / 40 * 3 * 130000,
+    "catenary track uses its generated module cost"
+)
 for _, catenaryTerminal in ipairs(catenaryResult.subconstructions[1].station.terminals) do
     assertEqual(#catenaryTerminal.transportModes, 2, "electrified terminal mode count")
     assertEqual(catenaryTerminal.transportModes[1], "TRAIN", "electrified train mode")
@@ -1514,7 +1835,6 @@ local invalidPairOk = pcall(script.upgradeFn, construction.upgradeScript.params,
 assertEqual(invalidPairOk, false, "invalid catenary pair rejection")
 
 local currentModId = "apasz_zigzag"
-local registeredConstructionModifier = nil
 local loggedMessages = {}
 _G.log = {
     verbose = function(message)
@@ -1533,11 +1853,98 @@ _G.log = {
 _G.getCurrentModId = function()
     return currentModId
 end
-_G.addModifier = function(category, modifier)
-    assertEqual(category, "loadConstruction", "costs modifier category")
-    assertEqual(registeredConstructionModifier, nil, "single costs modifier")
-    registeredConstructionModifier = modifier
+
+local moduleResources = {}
+for trackResourceName, costRate in pairs(moduleCostRates) do
+    moduleResources["::/trainstation_" .. trackResourceName:gsub("::", "__")] = {
+        metadata = {
+            price = costRate.construction,
+            maintenanceCost = costRate.maintenance,
+        },
+    }
 end
+moduleResources["::/trainstation_malformed_module.track"] = {
+    metadata = {
+        price = 75000,
+        maintenanceCost = nil,
+    },
+}
+for eraSuffix, rates in pairs({
+    a = captureParams.platformCostProfiles[1],
+    b = captureParams.platformCostProfiles[2],
+    c = captureParams.platformCostProfiles[3],
+}) do
+    moduleResources[
+        "::/stations/rail/modular_station/platform_passenger_era_"
+            .. eraSuffix
+            .. ".module"
+    ] = {
+        availability = { yearFrom = rates.yearFrom },
+        metadata = {
+            price = rates.passenger.construction,
+            maintenanceCost = rates.passenger.maintenance,
+        },
+    }
+    moduleResources[
+        "::/stations/rail/modular_station/platform_cargo_era_"
+            .. eraSuffix
+            .. ".module"
+    ] = {
+        availability = { yearFrom = rates.yearFrom },
+        metadata = {
+            price = rates.cargo.construction,
+            maintenanceCost = rates.cargo.maintenance,
+        },
+    }
+end
+
+local configuredConstruction = nil
+gameApi.type.ScriptRef = {
+    new = function()
+        return {}
+    end,
+}
+gameApi.res.streetTemplateRep.getAll = function()
+    local resourceNames = {}
+    for resourceName in pairs(templates) do
+        resourceNames[#resourceNames + 1] = resourceName
+    end
+    return resourceNames
+end
+gameApi.res.moduleRep = {
+    find = function(resourceName)
+        return moduleResources[resourceName] ~= nil and resourceName or -1
+    end,
+    get = function(resourceName)
+        local module = assert(
+            moduleResources[resourceName],
+            "unknown module " .. tostring(resourceName)
+        )
+        return {
+            availability = module.availability,
+            metadata = {
+                price = module.metadata.price * activeInfrastructureCostScale,
+                maintenanceCost = module.metadata.maintenanceCost,
+            },
+        }
+    end,
+}
+gameApi.res.constructionRep = {
+    find = function(resourceName)
+        if resourceName == currentModId .. "::/stations/rail/zigzag/zigzag.con" then
+            return resourceName
+        end
+        return -1
+    end,
+    get = function(resourceName)
+        assertEqual(
+            resourceName,
+            currentModId .. "::/stations/rail/zigzag/zigzag.con",
+            "configured construction resource"
+        )
+        return assert(configuredConstruction)
+    end,
+}
 
 local modScript = loadData("content/mod.script.lua")
 assertEqual(
@@ -1545,92 +1952,382 @@ assertEqual(
     false,
     "production debug logging default"
 )
-local function runModScript(allModParams)
-    registeredConstructionModifier = nil
+assertEqual(type(modScript.postRunFn), "function", "cost configuration post-run callback")
+assertEqual(modScript.runFn, nil, "cost configuration needs loaded resources")
+
+local function runModScript(
+    allModParams,
+    infrastructureCostScale,
+    infrastructureMaintenanceScale
+)
+    activeInfrastructureCostScale = infrastructureCostScale or 1
+    activeInfrastructureMaintenanceScale = infrastructureMaintenanceScale or 1
+    configuredConstruction = loadData("content/stations/rail/zigzag/zigzag.con.lua")
+    for _, template in ipairs(configuredConstruction.constructionTemplates) do
+        template.desc = template.description
+    end
     loggedMessages = {}
-    modScript.runFn({}, {}, allModParams, nil)
-    return registeredConstructionModifier
+    local baseConfig = nil
+    if infrastructureCostScale ~= nil or infrastructureMaintenanceScale ~= nil then
+        baseConfig = {
+            costs = {
+                infrastructureCostScale = activeInfrastructureCostScale,
+                infrastructureMaintenanceScale = activeInfrastructureMaintenanceScale,
+            },
+        }
+    end
+    modScript.postRunFn({}, {}, allModParams, baseConfig)
+    return configuredConstruction
 end
 
-assertEqual(runModScript(nil), nil, "missing mod parameters preserve default costs")
-assertEqual(#loggedMessages, 0, "default costs produce no log noise")
+local defaultCostConstruction = runModScript(nil)
+local defaultCostParams = defaultCostConstruction.updateScript.params
+assertEqual(defaultCostParams.costMode, "MODULE_COST", "new games default to module cost")
+assertEqual(#loggedMessages, 1, "cost-mode configuration log count")
 assertEqual(
-    runModScript({
-        [currentModId] = {
-            apasz_zigzag_costs_enabled = 2,
-        },
-    }),
-    nil,
-    "enabled costs avoid modifier registration"
+    loggedMessages[1],
+    "[Zigzag Station] Configured cost mode MODULE_COST",
+    "default cost-mode log message"
 )
-assertEqual(#loggedMessages, 0, "enabled costs produce no log noise")
+assertEqual(
+    defaultCostParams.trackCostProfiles["custom.track"].perMetre.construction,
+    250,
+    "live selected-track construction rate"
+)
+assertEqual(
+    defaultCostParams.trackCostProfiles["custom.track"].perMetre.maintenance,
+    40,
+    "live selected-track maintenance rate"
+)
+assertEqual(
+    defaultCostParams.trackCostProfiles["custom.track"].perModule.construction,
+    100000,
+    "generated track-module construction rate"
+)
+assertEqual(
+    defaultCostParams.trackCostProfiles["other_mod::/modded.track"].perModule.construction,
+    95000,
+    "namespaced generated track-module construction rate"
+)
+local incompleteTrackProfile = defaultCostParams.trackCostProfiles[
+    "::/industries/shared/industry_track/industry.street_template"
+]
+assertEqual(incompleteTrackProfile.perMetre, nil, "incomplete per-metre costs are ignored")
+assertEqual(
+    incompleteTrackProfile.perModule.construction,
+    50000,
+    "an incomplete track can still use its valid module cost"
+)
+assertEqual(
+    defaultCostParams.trackCostProfiles["zero_cost.track"].perMetre.construction,
+    0,
+    "explicit zero track construction cost is retained"
+)
+assertEqual(
+    defaultCostParams.trackCostProfiles["zero_cost.track"].perMetre.maintenance,
+    0,
+    "explicit zero track maintenance cost is retained"
+)
+assertEqual(
+    defaultCostParams.trackCostProfiles["zero_cost.track"].perModule,
+    nil,
+    "track cost does not require a generated module"
+)
+assertEqual(
+    defaultCostParams.trackCostProfiles["malformed_module.track"].perModule,
+    nil,
+    "incomplete generated-module costs are ignored"
+)
+assertEqual(
+    #defaultCostParams.platformCostProfiles,
+    0,
+    "module mode does not capture unused platform costs"
+)
 
-registeredConstructionModifier = nil
-local invalidCostsParamOk, invalidCostsParamError = pcall(modScript.runFn, {}, {}, {
+local defaultAttributes = defaultCostConstruction.constructionTemplates[1].desc.attributes
+assertEqual(defaultAttributes.cost[1], 50000 * 5 / 40, "module-mode minimum menu cost")
+assertEqual(
+    defaultAttributes.cost[2],
+    130000 * 440 / 40 * 8,
+    "module-mode maximum menu cost"
+)
+assertEqual(
+    defaultAttributes.maintenanceCost[1],
+    5000 * 5 / 40,
+    "module-mode minimum menu maintenance"
+)
+assertEqual(
+    defaultAttributes.maintenanceCost[2],
+    13000 * 440 / 40 * 8,
+    "module-mode maximum menu maintenance"
+)
+
+local zeroModuleName = "::/trainstation_zero_cost.track"
+moduleResources[zeroModuleName] = {
+    metadata = {
+        price = 0,
+        maintenanceCost = 0,
+    },
+}
+local zeroModuleConstruction = runModScript({
     [currentModId] = {
         apasz_zigzag_costs_enabled = 3,
     },
-}, nil)
-assertEqual(invalidCostsParamOk, false, "invalid costs mod parameter rejection")
-assertEqual(
-    string.find(
-        tostring(invalidCostsParamError),
-        "[Zigzag Station] ERROR: invalid costs mod parameter 3",
-        1,
-        true
-    ) ~= nil,
-    true,
-    "invalid costs mod parameter log prefix"
+})
+local zeroModuleProfile =
+    zeroModuleConstruction.updateScript.params.trackCostProfiles["zero_cost.track"]
+assertEqual(zeroModuleProfile.perModule.construction, 0, "explicit zero module price")
+assertEqual(zeroModuleProfile.perModule.maintenance, 0, "explicit zero module maintenance")
+local zeroModuleResult = runRestrictedUpdateWithCapture(
+    zeroModuleConstruction.updateScript.params,
+    {
+        lengthMetres = 40,
+        streetTemplate = "zero_cost.track",
+        catenary = 1,
+    }
 )
-assertEqual(registeredConstructionModifier, nil, "invalid costs parameter registers no modifier")
+assertEqual(zeroModuleResult.cost, 0, "explicit zero module construction result")
+assertEqual(zeroModuleResult.maintenanceCost, 0, "explicit zero module maintenance result")
+moduleResources[zeroModuleName] = nil
 
-local disableCostsModifier = runModScript({
+local noCostConstruction = runModScript({
     [currentModId] = {
         apasz_zigzag_costs_enabled = 1,
     },
 })
-assertEqual(type(disableCostsModifier), "function", "disabled costs register modifier")
-assertEqual(#loggedMessages, 1, "disabled costs log count")
+assertEqual(noCostConstruction.updateScript.params.costMode, "NO_COST", "index one is no cost")
 assertEqual(
-    loggedMessages[1],
-    "[Zigzag Station] Costs disabled by mod setting",
-    "disabled costs log message"
+    next(noCostConstruction.updateScript.params.trackCostProfiles),
+    nil,
+    "no-cost mode does not capture unused track costs"
 )
-
-local unrelatedConstruction = {}
-assertEqual(
-    disableCostsModifier("other_mod::/stations/rail/zigzag/zigzag.con", unrelatedConstruction),
-    unrelatedConstruction,
-    "costs modifier ignores other constructions"
-)
-
-local noCostConstruction = loadData("content/stations/rail/zigzag/zigzag.con.lua")
-local modifiedConstruction = disableCostsModifier(
-    currentModId .. "::/stations/rail/zigzag/zigzag.con",
-    noCostConstruction
-)
-assertEqual(modifiedConstruction, noCostConstruction, "costs modifier updates in place")
-assertEqual(noCostConstruction.updateScript.params.costPerMetre, 0, "disabled construction cost rate")
-assertEqual(
-    noCostConstruction.updateScript.params.maintenanceCostPerMetre,
-    0,
-    "disabled maintenance cost rate"
-)
-local noCostAttributes = noCostConstruction.constructionTemplates[1].description.attributes
-assertEqual(noCostAttributes.cost[1], 0, "disabled minimum displayed cost")
-assertEqual(noCostAttributes.cost[2], 0, "disabled maximum displayed cost")
-assertEqual(noCostAttributes.maintenanceCost[1], 0, "disabled minimum displayed maintenance")
-assertEqual(noCostAttributes.maintenanceCost[2], 0, "disabled maximum displayed maintenance")
-
-local noCostResult = runRestrictedUpdateWithCapture(
+local noCostAttributes = noCostConstruction.constructionTemplates[1].desc.attributes
+assertEqual(noCostAttributes.cost[1], 0, "no-cost minimum menu cost")
+assertEqual(noCostAttributes.cost[2], 0, "no-cost maximum menu cost")
+assertEqual(noCostAttributes.maintenanceCost[1], 0, "no-cost minimum menu maintenance")
+assertEqual(noCostAttributes.maintenanceCost[2], 0, "no-cost maximum menu maintenance")
+local configuredNoCostResult = runRestrictedUpdateWithCapture(
     noCostConstruction.updateScript.params,
     {
         tracks = 8,
         lengthMetres = 440,
     }
 )
-assertEqual(noCostResult.cost, 0, "disabled construction cost")
-assertEqual(noCostResult.maintenanceCost, 0, "disabled maintenance cost")
-assertEqual(#noCostResult.edgeLists[1].edges, 8 * nodesPerTrack, "disabled costs preserve geometry")
+assertEqual(configuredNoCostResult.cost, 0, "configured no-cost construction cost")
+assertEqual(configuredNoCostResult.maintenanceCost, 0, "configured no-cost maintenance cost")
+
+local zeroScaleNoCostConstruction = runModScript({
+    [currentModId] = {
+        apasz_zigzag_costs_enabled = 1,
+    },
+}, 0)
+assertEqual(
+    zeroScaleNoCostConstruction.constructionTemplates[1].desc.attributes.cost[2],
+    0,
+    "no-cost mode accepts a zero infrastructure scale"
+)
+
+local migratedOnConstruction = runModScript({
+    [currentModId] = {
+        apasz_zigzag_costs_enabled = 2,
+    },
+}, 1.5, 2)
+local migratedOnParams = migratedOnConstruction.updateScript.params
+assertEqual(migratedOnParams.costMode, "TRACK_COST", "old On setting migrates to track cost")
+assertEqual(
+    #migratedOnParams.platformCostProfiles,
+    0,
+    "track mode does not capture unused platform costs"
+)
+assertEqual(
+    migratedOnParams.trackCostProfiles["custom.track"].perMetre.construction,
+    250,
+    "post-run track construction rate removes the applied scale"
+)
+assertEqual(
+    migratedOnParams.trackCostProfiles["custom.track"].perMetre.maintenance,
+    40,
+    "post-run track maintenance rate removes the applied scale"
+)
+local trackAttributes = migratedOnConstruction.constructionTemplates[1].desc.attributes
+assertEqual(
+    trackAttributes.cost[1],
+    0,
+    "track-mode menu includes explicit zero construction costs"
+)
+assertEqual(
+    trackAttributes.cost[2],
+    440 * 8 * 540 * 1.5,
+    "track-mode maximum menu cost includes infrastructure scale"
+)
+assertEqual(
+    trackAttributes.maintenanceCost[1],
+    0,
+    "track-mode menu includes explicit zero maintenance costs"
+)
+assertEqual(
+    trackAttributes.maintenanceCost[2],
+    440 * 8 * 90 * 2,
+    "track-mode maximum maintenance includes the vanilla scale"
+)
+
+local configuredScaledTrackResult = runRestrictedUpdateWithCapture(
+    migratedOnParams,
+    {
+        tracks = 3,
+        lengthMetres = 40,
+        streetTemplate = "custom.track",
+        catenary = 1,
+    }
+)
+assertEqual(
+    configuredScaledTrackResult.cost,
+    40 * 3 * 250,
+    "post-run track cost removes the already-applied construction scale"
+)
+assertEqual(
+    configuredScaledTrackResult.maintenanceCost,
+    40 * 3 * 40,
+    "post-run track cost removes the already-applied maintenance scale"
+)
+
+local explicitModuleConstruction = runModScript({
+    [currentModId] = {
+        apasz_zigzag_costs_enabled = 3,
+    },
+}, 1.5, 2)
+assertEqual(
+    explicitModuleConstruction.updateScript.params.costMode,
+    "MODULE_COST",
+    "index three is module cost"
+)
+local explicitModuleParams = explicitModuleConstruction.updateScript.params
+assertEqual(
+    explicitModuleParams.trackCostProfiles["custom.track"].perModule.construction,
+    100000,
+    "post-run module price removes the applied construction scale"
+)
+local explicitModuleAttributes =
+    explicitModuleConstruction.constructionTemplates[1].desc.attributes
+assertEqual(
+    explicitModuleAttributes.cost[2],
+    130000 * 1.5 * 440 / 40 * 8,
+    "module-mode menu uses the vanilla-scaled module price"
+)
+assertEqual(
+    explicitModuleAttributes.maintenanceCost[2],
+    13000 * 2 * 440 / 40 * 8,
+    "module-mode menu applies the vanilla maintenance scale"
+)
+local configuredScaledModuleResult = runRestrictedUpdateWithCapture(
+    explicitModuleConstruction.updateScript.params,
+    {}
+)
+assertEqual(configuredScaledModuleResult.cost, 20000, "scaled module construction result")
+assertEqual(
+    configuredScaledModuleResult.maintenanceCost,
+    2000,
+    "scaled module maintenance result remains unscaled for vanilla"
+)
+
+local zeroScaleModuleConstruction = runModScript({
+    [currentModId] = {
+        apasz_zigzag_costs_enabled = 3,
+    },
+}, 0)
+local configuredZeroScaleModuleResult = runRestrictedUpdateWithCapture(
+    zeroScaleModuleConstruction.updateScript.params,
+    {}
+)
+assertEqual(
+    configuredZeroScaleModuleResult.cost,
+    0,
+    "module-cost mode supports a zero infrastructure scale"
+)
+
+local stationCostConstruction = runModScript({
+    [currentModId] = {
+        apasz_zigzag_costs_enabled = 4,
+    },
+}, 1.5, 2)
+assertEqual(
+    stationCostConstruction.updateScript.params.costMode,
+    "STATION_COST",
+    "index four is station cost"
+)
+assertEqual(
+    stationCostConstruction.updateScript.params.platformCostProfiles[2].passenger.construction,
+    90000,
+    "passenger platform-module construction rate"
+)
+assertEqual(
+    stationCostConstruction.updateScript.params.platformCostProfiles[3].cargo.maintenance,
+    10000,
+    "cargo platform-module maintenance rate"
+)
+local stationAttributes = stationCostConstruction.constructionTemplates[1].desc.attributes
+assertEqual(
+    stationAttributes.cost[1],
+    50000 * 1.5 * 5 / 40,
+    "station-mode minimum menu cost"
+)
+assertEqual(
+    stationAttributes.cost[2],
+    (
+        130000 * 440 / 40 * 8
+        + (120000 + 60000) * 440 / 40 * 5
+    ) * 1.5,
+    "station-mode maximum menu cost"
+)
+assertEqual(
+    stationAttributes.maintenanceCost[2],
+    (
+        13000 * 440 / 40 * 8
+        + (20000 + 10000) * 440 / 40 * 5
+    ) * 2,
+    "station-mode maximum menu maintenance"
+)
+
+local configuredStationResult = runRestrictedUpdateWithCapture(
+    stationCostConstruction.updateScript.params,
+    {
+        lengthMetres = 40,
+        passengerLoadingEnabled = 2,
+        year = 0,
+    }
+)
+assertEqual(
+    configuredStationResult.cost,
+    80000 + 60000,
+    "post-run station profile reaches update script"
+)
+assertEqual(
+    configuredStationResult.maintenanceCost,
+    8000 + 10000,
+    "post-run station maintenance remains unscaled for vanilla"
+)
+
+local invalidCostsParamOk, invalidCostsParamError = pcall(
+    modScript.postRunFn,
+    {},
+    {},
+    {
+        [currentModId] = {
+            apasz_zigzag_costs_enabled = 5,
+        },
+    },
+    nil
+)
+assertEqual(invalidCostsParamOk, false, "invalid cost-mode parameter rejection")
+assertEqual(
+    string.find(
+        tostring(invalidCostsParamError),
+        "[Zigzag Station] ERROR: invalid cost mode parameter 5",
+        1,
+        true
+    ) ~= nil,
+    true,
+    "invalid cost-mode parameter log prefix"
+)
 
 print("zigzag_check: ok")

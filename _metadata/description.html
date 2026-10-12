@@ -1,49 +1,37 @@
 <h1>Zigzag Station</h1>
 
 <p>
-  A compact, platform-free railway station for reversing trains and building switchback or
-  zigzag lines.
+  A compact, platform-free rail station for reversals, switchbacks, and turnbacks.
 </p>
-
-<h2>Uses</h2>
-
-<ul>
-  <li>Create reversing points where a train arrives from one direction and departs in another.</li>
-  <li>Build mountain switchbacks where trains alternate direction while climbing or descending.</li>
-  <li>Add compact operational stops without constructing a passenger or cargo platform.</li>
-</ul>
 
 <h2>Features</h2>
 
 <ul>
-  <li>One to eight parallel station tracks with connectable nodes at both ends.</li>
-  <li>One physical stopping point at the centre of each track.</li>
-  <li>Adjustable lengths of 5, 10, and 20 metres, then 40-metre steps through 440 metres.</li>
-  <li>Adjustable track spacing from 3 to 20 metres, in one-metre steps.</li>
-  <li>Optional mod setting to disable both construction and maintenance costs.</li>
-  <li>Independent passenger and cargo loading controls.</li>
-  <li>Passenger capacity adjustable from 0.5× to 3×, with 1× as the default.</li>
-  <li>Catchment radius adjustable from 50 to 300 metres.</li>
-  <li>Vanilla track type, high-speed track, and catenary options during construction.</li>
-  <li>Compatible with passenger and cargo consists in the line manager.</li>
-  <li>Compatible track mods can be applied afterwards with the normal track-upgrade tool.</li>
-  <li>Track upgrades apply to every track in a Zigzag Station together.</li>
-  <li>Supports catenary, third-rail, and other always-electric track types.</li>
-  <li>Localised construction text for every language shipped with Transport Fever 3.</li>
+  <li>One to eight tracks, 5–440 metres long, with 3–20 metre spacing.</li>
+  <li>Independent passenger and cargo loading without visible platforms.</li>
+  <li>Adjustable passenger capacity and 50–300 metre catchment radius.</li>
+  <li>Vanilla track and catenary selection; compatible with track upgrades.</li>
+  <li>Four construction and maintenance cost modes.</li>
 </ul>
 
-<h2>Important</h2>
+<h2>Cost modes</h2>
+
+<ul>
+  <li><strong>No Cost:</strong> free construction and maintenance.</li>
+  <li><strong>Track Cost:</strong> the selected track's per-metre cost for every track.</li>
+  <li>
+    <strong>Module Cost:</strong> the equivalent vanilla track-module cost, scaled by length
+    (default).
+  </li>
+  <li>
+    <strong>Station Cost:</strong> Module Cost plus vanilla passenger and cargo platform modules
+    for the enabled loading modes.
+  </li>
+</ul>
 
 <p>
-  This is a <strong>track-only station</strong> with no visible platform. Loading is disabled by
-  default, preserving its role as a compact reversing stop. Passenger and cargo loading can be
-  enabled independently during construction. Passenger loading adds invisible pedestrian access;
-  either loading mode adds catchment coverage at both ends and the midpoint.
-</p>
-
-<p>
-  The station does not explicitly command a train to reverse. Transport Fever's route solver
-  reverses the train when the next leg of its line requires departure in the opposite direction.
+  The station does not force a reversal. Trains reverse when the next leg of their route requires
+  it. Existing Off/On cost settings migrate to No Cost/Track Cost.
 </p>
 
 <h2>Links</h2>
