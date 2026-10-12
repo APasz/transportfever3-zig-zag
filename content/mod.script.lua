@@ -7,6 +7,7 @@ local logging = ug_require(
 
 local COST_MODE_PARAM_KEY = "apasz_zigzag_costs_enabled"
 local DEFAULT_COST_MODE_INDEX = 3
+local MAX_CAPTURE_PARAM_DEPTH = 16
 local ZIGZAG_CONSTRUCTION_PATH = "::/stations/rail/zigzag/zigzag.con"
 local PASSENGER_PLATFORM_PATH_PREFIX =
 "::/stations/rail/modular_station/platform_passenger_era_"
@@ -47,6 +48,88 @@ local COST_MODES = {
 
 
 
+
+
+
+
+
+
+
+
+local function requireConstructionUpdateScript(
+   construction)
+
+   local updateScriptValue = construction.updateScript
+   if updateScriptValue == nil then
+      return logger.fail("construction update script was removed by another mod")
+   end
+   local updateScript = updateScriptValue
+   if type(updateScript.fileName) ~= "string" or updateScript.fileName == "" then
+      return logger.fail("construction update script has no valid file name")
+   end
+   return updateScript
+end
+
+local function dynamicTable(value)
+   if type(value) == "table" then
+      return value
+   end
+   return nil
+end
+
+local function isCostCaptureParams(params)
+   return type(params.lengthsMetres) == "table" and
+   type(params.trackCounts) == "table" and
+   type(params.moduleLengthMetres) == "number" and
+   type(params.costMode) == "string" and
+   type(params.trackCostProfiles) == "table" and
+   type(params.platformCostProfiles) == "table"
+end
+
+local function collectCostCaptureParams(
+   value,
+   depth,
+   visited,
+   matches)
+
+   local candidate = dynamicTable(value)
+   if candidate == nil or depth > MAX_CAPTURE_PARAM_DEPTH then
+      return
+   end
+   local current = candidate
+   if visited[current] then
+      return
+   end
+   visited[current] = true
+   if isCostCaptureParams(current) then
+      matches[#matches + 1] = current
+      return
+   end
+   for _, nestedValue in pairs(current) do
+      collectCostCaptureParams(nestedValue, depth + 1, visited, matches)
+   end
+end
+
+local function requireCostCaptureParams(
+   rootParams,
+   updateScriptName)
+
+   local matches = {}
+   collectCostCaptureParams(rootParams, 0, {}, matches)
+   if #matches == 0 then
+      return logger.fail(
+      "could not locate Zigzag update parameters beneath " ..
+      updateScriptName)
+
+   end
+   if #matches > 1 then
+      return logger.fail(
+      "found multiple Zigzag update parameter tables beneath " ..
+      updateScriptName)
+
+   end
+   return matches[1]
+end
 
 local function costMode(allModParams)
    local selectedIndex = DEFAULT_COST_MODE_INDEX
@@ -468,6 +551,14 @@ local function configureConstruction(
       return
    end
    local construction = api.res.constructionRep.get(constructionId)
+   local existingUpdateScript = requireConstructionUpdateScript(
+   construction)
+
+   local rootParams = existingUpdateScript.params
+   local params = requireCostCaptureParams(
+   rootParams,
+   existingUpdateScript.fileName)
+
    local constructionScale = infrastructureScale(
    baseConfig,
    "infrastructureCostScale",
@@ -490,14 +581,13 @@ local function configureConstruction(
       platformProfiles = collectPlatformCostProfiles(constructionScale)
    end
 
-   local params = construction.updateScript.params
    params.costMode = mode
    params.trackCostProfiles = trackProfiles
    params.platformCostProfiles = platformProfiles
 
    local updateScript = api.type.ScriptRef.new()
-   updateScript.fileName = construction.updateScript.fileName
-   updateScript.params = params
+   updateScript.fileName = existingUpdateScript.fileName
+   updateScript.params = rootParams
    construction.updateScript = updateScript
 
    local template = construction.constructionTemplates[1]

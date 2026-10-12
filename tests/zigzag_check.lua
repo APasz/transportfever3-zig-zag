@@ -1958,13 +1958,17 @@ assertEqual(modScript.runFn, nil, "cost configuration needs loaded resources")
 local function runModScript(
     allModParams,
     infrastructureCostScale,
-    infrastructureMaintenanceScale
+    infrastructureMaintenanceScale,
+    updateScriptWrapper
 )
     activeInfrastructureCostScale = infrastructureCostScale or 1
     activeInfrastructureMaintenanceScale = infrastructureMaintenanceScale or 1
     configuredConstruction = loadData("content/stations/rail/zigzag/zigzag.con.lua")
     for _, template in ipairs(configuredConstruction.constructionTemplates) do
         template.desc = template.description
+    end
+    if updateScriptWrapper ~= nil then
+        updateScriptWrapper(configuredConstruction)
     end
     loggedMessages = {}
     local baseConfig = nil
@@ -2042,6 +2046,111 @@ assertEqual(
     #defaultCostParams.platformCostProfiles,
     0,
     "module mode does not capture unused platform costs"
+)
+
+local wrappedCostConstruction = runModScript(
+    {
+        [currentModId] = {
+            apasz_zigzag_costs_enabled = 3,
+        },
+    },
+    nil,
+    nil,
+    function(candidate)
+        local original = candidate.updateScript
+        local inner = {
+            fileName = "compatibility_test::/inner.script@update",
+            params = {
+                callback = original.fileName,
+                arguments = original.params,
+            },
+        }
+        local outerParams = {
+            callback = inner.fileName,
+            arguments = inner.params,
+        }
+        outerParams.self = outerParams
+        candidate.updateScript = {
+            fileName = "compatibility_test::/outer.script@update",
+            params = outerParams,
+        }
+    end
+)
+local wrappedRootParams = wrappedCostConstruction.updateScript.params
+local wrappedCostParams = wrappedRootParams.arguments.arguments
+assertEqual(
+    wrappedCostConstruction.updateScript.fileName,
+    "compatibility_test::/outer.script@update",
+    "wrapped update script is preserved"
+)
+assertEqual(
+    wrappedRootParams.callback,
+    "compatibility_test::/inner.script@update",
+    "outer wrapper callback is preserved"
+)
+assertEqual(
+    wrappedRootParams.arguments.callback,
+    "zigzag.script@updateFn",
+    "inner wrapper callback is preserved"
+)
+assertEqual(wrappedRootParams.costMode, nil, "wrapper parameters are not polluted")
+assertEqual(
+    wrappedCostParams.costMode,
+    "MODULE_COST",
+    "nested Zigzag parameters receive the cost mode"
+)
+assertEqual(
+    wrappedCostParams.trackCostProfiles["custom.track"].perModule.construction,
+    100000,
+    "nested Zigzag parameters receive cost profiles"
+)
+local wrappedCostResult = runRestrictedUpdateWithCapture(wrappedCostParams, {})
+assertEqual(wrappedCostResult.cost, 20000, "nested cost profile reaches update script")
+
+local discardedParamsOk, discardedParamsError = pcall(
+    runModScript,
+    nil,
+    nil,
+    nil,
+    function(candidate)
+        candidate.updateScript = {
+            fileName = "broken_mod::/replacement.script@update",
+            params = {},
+        }
+    end
+)
+assertEqual(discardedParamsOk, false, "discarded update parameters are rejected")
+assertEqual(
+    string.find(
+        tostring(discardedParamsError),
+        "could not locate Zigzag update parameters beneath "
+            .. "broken_mod::/replacement.script@update",
+        1,
+        true
+    ) ~= nil,
+    true,
+    "discarded update parameters produce a compatibility error"
+)
+
+local removedScriptOk, removedScriptError = pcall(
+    runModScript,
+    nil,
+    nil,
+    nil,
+    function(candidate)
+        candidate.updateScript = nil
+    end
+)
+assertEqual(removedScriptOk, false, "removed update script is rejected")
+assertEqual(
+    string.find(
+        tostring(removedScriptError),
+        "construction update script was removed by another mod",
+        1,
+        true
+    ) ~= nil,
+    true,
+    "removed update script produces a compatibility error"
 )
 
 local defaultAttributes = defaultCostConstruction.constructionTemplates[1].desc.attributes
