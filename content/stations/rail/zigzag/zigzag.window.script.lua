@@ -1,6 +1,9 @@
 local make_entity_window = ug_require(
 "::/gui/entity_window/make_entity_window.tl")
 
+local StationGroupWindowContent = ug_require(
+"::/gui/entity_window/station_group/station_group.tl")
+
 
 
 
@@ -33,7 +36,7 @@ end
 local function entityWindowFn(
    _captureParams,
    constructionEntity,
-   _tag,
+   tag,
    gameCtx,
    isMapEditor,
    isSandboxMode,
@@ -41,19 +44,28 @@ local function entityWindowFn(
    entityRevisionCloseConditionAndProxy)
 
    local stationGroupEntity = requireStationGroup(constructionEntity)
+   local actions = make_entity_window.makeSetActionFnWithCombinedKey(
+   StationGroupWindowContent,
+   setActionFnAndProxy)
 
-   local result = make_entity_window.makeEntityWindowContent(
-   stationGroupEntity,
-   gameCtx,
-   isMapEditor,
-   isSandboxMode,
-   true,
-   setActionFnAndProxy,
-   entityRevisionCloseConditionAndProxy,
-   nil)
 
-   result.replacedEntity = constructionEntity
-   return result
+
+   return {
+      recipe = StationGroupWindowContent,
+      param = {
+         meta = { tag = tag .. "station" },
+         keyEntity = stationGroupEntity,
+         gameCtx = gameCtx,
+         isMapEditor = isMapEditor,
+         isSandboxMode = isSandboxMode,
+         setActionFn = actions.fn,
+         setActionFn_compareProxy = actions.proxy,
+      },
+      replacedEntity = constructionEntity,
+      autoCloseCondition = entityRevisionCloseConditionAndProxy[1],
+      autoCloseCondition_compareProxy = entityRevisionCloseConditionAndProxy[2],
+      fallbackTitle = _("Station"),
+   }
 end
 
 function data()

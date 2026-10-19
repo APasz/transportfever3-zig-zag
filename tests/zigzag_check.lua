@@ -564,32 +564,23 @@ do
     local gameContext = {}
     local actionFunctionAndProxy = { function() end, "action-proxy" }
     local closeConditionAndProxy = { function() return false end, "close-proxy" }
-    local nativeWindowResult = {
-        recipe = function() end,
-        param = { keyEntity = stationGroupEntity },
-        fallbackTitle = "Station",
-        autoCloseCondition = closeConditionAndProxy[1],
-        autoCloseCondition_compareProxy = closeConditionAndProxy[2],
-    }
-    local factoryCalls = 0
-    local expectedMode
+    local stationRecipe = function() end
+    local nativeActions = { fn = function() end, proxy = {} }
+    local actionHelperCalls = 0
 
+    package.preload["::/gui/entity_window/station_group/station_group.tl"] = function()
+        return stationRecipe
+    end
     package.preload["::/gui/entity_window/make_entity_window.tl"] = function()
         return {
-            makeEntityWindowContent = function(
-                entity, context, isMapEditor, isSandboxMode, skipConstruction,
-                actions, closeCondition, closeFunction
-            )
-                factoryCalls = factoryCalls + 1
-                assertEqual(entity, stationGroupEntity, "native window uses the station group")
-                assertEqual(context, gameContext, "native window game context")
-                assertEqual(isMapEditor, expectedMode[1], "native window map-editor mode")
-                assertEqual(isSandboxMode, expectedMode[2], "native window sandbox mode")
-                assertEqual(skipConstruction, true, "native dispatch bypasses the Zigzag hook")
+            makeEntityWindowContent = function()
+                error("station content must not re-enter global window factory wrappers")
+            end,
+            makeSetActionFnWithCombinedKey = function(recipe, actions)
+                actionHelperCalls = actionHelperCalls + 1
+                assertEqual(recipe, stationRecipe, "native action recipe identity")
                 assertEqual(actions, actionFunctionAndProxy, "native window selection actions")
-                assertEqual(closeCondition, closeConditionAndProxy, "native window lifetime")
-                assertEqual(closeFunction, nil, "station content needs no separate close handler")
-                return nativeWindowResult
+                return nativeActions
             end,
         }
     end
@@ -618,6 +609,7 @@ do
     assert(resourceName, "station window must reference a script callback")
     local windowScript = loadData("content/stations/rail/zigzag/" .. resourceName .. ".lua")
     local openStationWindow = assert(windowScript[callbackName], "missing station window callback")
+    local expectedMode
     local function openWindow()
         return openStationWindow(
             construction.entityWindowScript.params, constructionEntity, "test.zigzag.",
@@ -629,17 +621,30 @@ do
     for _, mode in ipairs({ { false, false }, { true, false }, { false, true }, { true, true } }) do
         expectedMode = mode
         local result = openWindow()
-        assertEqual(result, nativeWindowResult, "reuse native station content and lifecycle")
+        assertEqual(result.recipe, stationRecipe, "reuse native station content")
+        assertEqual(result.param.meta.tag, "test.zigzag.station", "native station content tag")
         assertEqual(result.param.keyEntity, stationGroupEntity, "native content station identity")
+        assertEqual(result.param.gameCtx, gameContext, "native window game context")
+        assertEqual(result.param.isMapEditor, mode[1], "native window map-editor mode")
+        assertEqual(result.param.isSandboxMode, mode[2], "native window sandbox mode")
+        assertEqual(result.param.setActionFn, nativeActions.fn, "native window action callback")
+        assertEqual(result.param.setActionFn_compareProxy, nativeActions.proxy, "native action proxy")
+        assertEqual(result.autoCloseCondition, closeConditionAndProxy[1], "native window lifetime")
+        assertEqual(
+            result.autoCloseCondition_compareProxy,
+            closeConditionAndProxy[2],
+            "native window lifetime proxy"
+        )
+        assertEqual(result.fallbackTitle, "Station", "native station fallback title")
         assertEqual(result.replacedEntity, constructionEntity, "rename the construction name stem")
     end
-    assertEqual(factoryCalls, 4, "one native window dispatch per selection")
+    assertEqual(actionHelperCalls, 4, "one native action binding per selection")
 
     local function assertInvalidWindowState(expectedError)
         local ok, message = pcall(openWindow)
         assertEqual(ok, false, "invalid station window state is rejected")
         assert(tostring(message):find(expectedError, 1, true), tostring(message))
-        assertEqual(factoryCalls, 4, "invalid state never reaches the native window")
+        assertEqual(actionHelperCalls, 4, "invalid state never binds native actions")
     end
 
     constructionComponent = nil

@@ -1,6 +1,9 @@
 local make_entity_window = ug_require(
     "::/gui/entity_window/make_entity_window.tl"
 ) as ViewManager.MakeEntityWindowContentFn
+local StationGroupWindowContent = ug_require(
+    "::/gui/entity_window/station_group/station_group.tl"
+) as Recipe<IEntityWindowParam>
 
 local type ActionFunctionAndProxy = {
     function(actionFn?: (function(): TreeNodeId), key2?: string),
@@ -33,7 +36,7 @@ end
 local function entityWindowFn(
     _captureParams: table,
     constructionEntity: Engine.Entity,
-    _tag: string,
+    tag: string,
     gameCtx: GameContext,
     isMapEditor: boolean,
     isSandboxMode: boolean,
@@ -41,19 +44,28 @@ local function entityWindowFn(
     entityRevisionCloseConditionAndProxy: CloseConditionAndProxy
 ): ViewManager.MakeEntityWindowResult
     local stationGroupEntity = requireStationGroup(constructionEntity)
-    -- Bypass construction dispatch so the native factory cannot re-enter this hook.
-    local result = make_entity_window.makeEntityWindowContent(
-        stationGroupEntity,
-        gameCtx,
-        isMapEditor,
-        isSandboxMode,
-        true,
-        setActionFnAndProxy,
-        entityRevisionCloseConditionAndProxy,
-        nil
+    local actions = make_entity_window.makeSetActionFnWithCombinedKey(
+        StationGroupWindowContent,
+        setActionFnAndProxy
     )
-    result.replacedEntity = constructionEntity
-    return result
+    -- The station recipe is known. Redispatching through the general factory
+    -- would apply global window wrappers twice to this construction's content.
+    return {
+        recipe = StationGroupWindowContent,
+        param = {
+            meta = { tag = tag .. "station" },
+            keyEntity = stationGroupEntity,
+            gameCtx = gameCtx,
+            isMapEditor = isMapEditor,
+            isSandboxMode = isSandboxMode,
+            setActionFn = actions.fn,
+            setActionFn_compareProxy = actions.proxy,
+        },
+        replacedEntity = constructionEntity,
+        autoCloseCondition = entityRevisionCloseConditionAndProxy[1],
+        autoCloseCondition_compareProxy = entityRevisionCloseConditionAndProxy[2],
+        fallbackTitle = _("Station"),
+    }
 end
 
 function data(): any

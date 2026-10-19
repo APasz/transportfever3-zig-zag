@@ -53,8 +53,9 @@ Runtime logging uses the shared `_logging` module. Debug logging is disabled by 
 
 Selecting a frozen Zigzag track forwards the native selection event to its owning construction.
 The construction's window hook then supplies vanilla station-group content and renames the
-construction name stem. The selection game script must be loaded by reloading the save after
-updating the mod.
+construction name stem. It returns the native station recipe directly and uses the game's
+action-binding helper, avoiding repeated dispatch through global window-factory wrappers.
+The selection game script must be loaded by reloading the save after updating the mod.
 
 The window tests cover callback loading through `data()`, track-selection forwarding,
 generated construction names, native station content, and the construction rename target.
