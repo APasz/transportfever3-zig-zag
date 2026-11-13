@@ -19,6 +19,8 @@ A platform-free railway station for reversing trains and building switchback or 
   New games default to module cost; old Off/On configurations migrate to No Cost/Track Cost.
 - Select visible vanilla and modded tracks during construction, including electrified and
   third-rail variants, respecting their availability years and native menu order.
+- Track dropdown entries show the track's existing icon beside its name, with text fallback
+  when icon metadata is empty. Long names wrap within the construction panel's width.
 - Track mods can also be applied afterwards with the normal track-upgrade tool.
 - Track upgrades apply to every track in a Zigzag Station together.
 - Track upgrades derive and persist the selected template's electric capability, including
@@ -32,8 +34,10 @@ The station does not explicitly command a train to reverse. Transport Fever's ro
 Load Zigzag after track packs and cost mods so its initial picker and cost snapshot include
 their final changes. New placements default to the first available track in native menu order.
 Existing stations retain their exact track when a mod hides it or it becomes unavailable for
-new construction. Missing track or track-module cost data produces one warning per track and
-cost type, with zero construction and maintenance costs for that track contribution. Explicit
+new construction. If the selected build-menu track becomes unavailable as the year changes,
+new placements switch to the first available track. Missing track or track-module cost data
+produces one warning per track and cost type, with zero construction and maintenance costs
+for that track contribution. Explicit
 zero prices are accepted without warnings; Station Cost still includes enabled platform costs.
 
 ## Development
@@ -46,6 +50,9 @@ tl gen -c -o content/zigzag/logging_config.lua src/zigzag/logging_config.tl
 tl gen -c -o content/zigzag/construction_path.lua src/zigzag/construction_path.tl
 tl gen -c -o content/zigzag/track_selection.lua src/zigzag/track_selection.tl
 tl gen -c -o content/zigzag/station_definition.lua src/zigzag/station_definition.tl
+tl gen -c -o content/gui/zigzag/track_icons.script.lua src/gui/zigzag/track_icons.script.tl
+tl gen -c -o content/gui/zigzag/track_icons.res.lua src/gui/zigzag/track_icons.res.tl
+tl gen -c -o content/gui/zigzag/track_icons.css.lua src/gui/zigzag/track_icons.css.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.con.lua src/stations/rail/zigzag/zigzag.con.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.metacon.lua src/stations/rail/zigzag/zigzag.metacon.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.template.script.lua src/stations/rail/zigzag/zigzag.template.script.tl
@@ -55,6 +62,7 @@ tl gen -c -o content/stations/rail/zigzag/zigzag.selection.gs.lua src/stations/r
 tl gen -c -o content/stations/rail/zigzag/zigzag.selection.script.lua src/stations/rail/zigzag/zigzag.selection.script.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.script.lua src/stations/rail/zigzag/zigzag.script.tl
 lua tests/zigzag_check.lua
+python3 tests/track_icons_check.py "/path/to/Transport Fever 3"
 ```
 
 User-facing text is defined in `strings.json`. Its translation keys are namespaced
@@ -70,6 +78,20 @@ and upgrades, while the picker only offers visible railway templates in the nati
 Only the selected pricing model is captured, once, and looked up without resource API calls
 during construction updates. The picker and upgrades share the same train-capable railway
 check. Definition values and controls are shared by the legacy construction and new template.
+
+Track icons use the native parameter's `images` array. A GUI bootstrap resource decorates only
+Zigzag's namespaced picker and carries its row renderer through the native UI conversion by
+function identity. The extension retains the native dropdown and compact callout, and delegates
+unrelated selectors to the previous renderer. Icon metadata is read during menu construction;
+rendering uses cached rows. Availability periods are indexed once for metadata lookup, and
+expired selections update the native stored value after rendering. Namespaced styles set the
+thumbnail size, spacing and name wrapping.
+
+The GUI checks compile the current renderer from the game's `base/content/gui.zip`, then test
+the extension against it. Use `--tl /path/to/tl` if the Teal compiler is not on PATH. Coverage
+includes year-filtered IDs, expired selections, reordered entries, empty icons, compact callouts,
+layout spacing, existing GUI wrappers, and avoiding resource lookups during rendering. In-game checks should
+include dropdown clipping and controller input at different UI scales.
 
 The track tests cover hidden vanilla and modded templates, third rail, availability boundaries,
 saved identity after catalogue reordering, wrapped scripts, zero-price fallbacks, cost scaling,

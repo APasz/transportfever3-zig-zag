@@ -61,11 +61,6 @@ local record TrackCatalog
     choices: {ZigzagTrackChoice}
 end
 
--- The installed native binding uses ScriptParam, unlike the serialized Teal definition.
-local record NativeTemplateParams
-    params: {ScriptParam}
-end
-
 local record ConstructionUpdateScript
     fileName: string
     params: any
@@ -340,6 +335,7 @@ local function collectTrackCatalog(
                 choices[#choices + 1] = {
                     resourceName = resourceName,
                     name = template.description.name,
+                    icon = template.description.icon,
                     order = order as number,
                     yearFrom = template.availability.yearFrom,
                     yearTo = template.availability.yearTo,
@@ -633,6 +629,7 @@ local function makeNativeTrackParam(param: ConstructionScriptParam): ScriptParam
     native.key = param.key
     native.name = param.name
     native.values = param.values
+    native.images = param.images
     native.numbers = param.numbers
     native.defaultIndex = param.defaultIndex
     native.uiType = api.type["enum"].ScriptParamType.ComboBox
@@ -669,7 +666,7 @@ local function configureTemplate(
     template.createTemplateScript = scriptRef
 
     local trackParams = trackSelection.makeParams(catalog.choices)
-    local nativeTemplate = template as NativeTemplateParams
+    local nativeTemplate = template as ZigzagNativeTemplateParams
     local params: {ScriptParam} = {}
     local replaced = false
     for _, param in ipairs(nativeTemplate.params) do

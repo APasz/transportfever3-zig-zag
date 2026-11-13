@@ -66,11 +66,6 @@ local COST_MODES = {
 
 
 
-
-
-
-
-
 local function requireConstructionUpdateScript(
    construction)
 
@@ -340,6 +335,7 @@ local function collectTrackCatalog(
             choices[#choices + 1] = {
                resourceName = resourceName,
                name = template.description.name,
+               icon = template.description.icon,
                order = order,
                yearFrom = template.availability.yearFrom,
                yearTo = template.availability.yearTo,
@@ -633,6 +629,7 @@ local function makeNativeTrackParam(param)
    native.key = param.key
    native.name = param.name
    native.values = param.values
+   native.images = param.images
    native.numbers = param.numbers
    native.defaultIndex = param.defaultIndex
    native.uiType = api.type["enum"].ScriptParamType.ComboBox

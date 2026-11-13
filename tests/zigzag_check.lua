@@ -2869,6 +2869,11 @@ do
         assert(pickerIncludes(builder, 2020, "third_rail.track"), "unpaired third rail is selectable")
         assert(nativeScriptParams[pickerAt(builder, 2020)], "picker uses a native ScriptParam object")
         assertEqual(pickerAt(builder, 2020).uiType, gameApi.type["enum"].ScriptParamType.ComboBox, "picker uses a native enum value")
+        local picker = pickerAt(builder, 2020)
+        for index, trackIndex in ipairs(picker.numbers) do
+            local resourceName = builder.createTemplateScript.params.tracks[trackIndex].resourceName
+            assertEqual(picker.images[index], templates[resourceName].description.icon, "native picker icons follow exact catalogue IDs")
+        end
         for _, param in ipairs(builder.params) do
             assert(param.key ~= "trackType" and param.key ~= "catenary", "new builds have no legacy track controls")
         end
@@ -2950,6 +2955,13 @@ do
         assertEqual(pickerIncludes(builder, 1850, "custom.track"), true, "track availability starts inclusively")
         assertEqual(pickerIncludes(builder, 1899, "custom.track"), true, "track remains available before retirement")
         assertEqual(pickerIncludes(builder, 1900, "custom.track"), false, "track retirement is exclusive")
+        for _, year in ipairs({ 1849, 1850, 1899, 1900 }) do
+            local picker = pickerAt(builder, year)
+            for position, trackIndex in ipairs(picker.numbers) do
+                local resourceName = builder.createTemplateScript.params.tracks[trackIndex].resourceName
+                assertEqual(picker.images[position], templates[resourceName].description.icon, "availability filtering preserves icon associations")
+            end
+        end
         local index = assert(trackIndex(builder, "custom.track"))
         local available = runRestrictedCallback(
             templateScript.createTemplateFn,
@@ -2957,12 +2969,21 @@ do
             { apasz_zigzag_track_variant = index, year = 1850 }
         )
         assertEqual(available.constructions[1].params.catenary, 1, "non-electric track capability is persisted")
-        local unavailableOk = pcall(
+        local expired = runRestrictedCallback(
             templateScript.createTemplateFn,
             builder.createTemplateScript.params,
             { apasz_zigzag_track_variant = index, year = 1900 }
         )
-        assertEqual(unavailableOk, false, "template rejects an unavailable new selection")
+        local firstAvailable = pickerAt(builder, 1900).numbers[1]
+        local firstAvailableTrack = builder.createTemplateScript.params.tracks[firstAvailable]
+        assertEqual(expired.constructions[1].params.streetTemplate, firstAvailableTrack.resourceName, "expired selections use the first available track for new placements")
+        local future = runRestrictedCallback(
+            templateScript.createTemplateFn,
+            builder.createTemplateScript.params,
+            { apasz_zigzag_track_variant = index, year = 1849 }
+        )
+        local firstEarlier = pickerAt(builder, 1849).numbers[1]
+        assertEqual(future.constructions[1].params.streetTemplate, builder.createTemplateScript.params.tracks[firstEarlier].resourceName, "moving the date backwards also selects an available track")
         local invalidOk = pcall(
             templateScript.createTemplateFn,
             builder.createTemplateScript.params,

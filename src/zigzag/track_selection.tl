@@ -73,10 +73,12 @@ local function makeParams(tracks: {ZigzagTrackChoice}): {ConstructionScriptParam
     local params: {ConstructionScriptParam} = {}
     for boundaryIndex, yearFrom in ipairs(boundaries) do
         local labels: {string} = {}
+        local icons: {string} = {}
         local numbers: {number} = {}
         for trackIndex, track in ipairs(tracks) do
             if isAvailable(track, yearFrom) then
                 labels[#labels + 1] = track.name
+                icons[#icons + 1] = track.icon
                 numbers[#numbers + 1] = trackIndex
             end
         end
@@ -85,6 +87,7 @@ local function makeParams(tracks: {ZigzagTrackChoice}): {ConstructionScriptParam
                 key = TRACK_PARAM_KEY,
                 name = _("Track Type"),
                 values = labels,
+                images = icons,
                 numbers = numbers,
                 defaultIndex = 1,
                 uiType = "ComboBox" as ConstructionScriptParam.Type,
@@ -106,11 +109,9 @@ local function resolveTrack(
         if track == nil then
             error("Zigzag Station received invalid track variant " .. tostring(selectedIndex))
         end
-        if not isAvailable(track, year) then
-            error("Zigzag Station track is unavailable in year "
-                .. tostring(year) .. ": " .. track.resourceName)
+        if isAvailable(track, year) then
+            return track
         end
-        return track
     end
     for _, track in ipairs(tracks) do
         if isAvailable(track, year) then

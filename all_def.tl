@@ -22,10 +22,16 @@ end
 global record ZigzagTrackChoice
     resourceName: string
     name: string
+    icon: string
     order: number
     yearFrom: integer
     yearTo: integer
     electrified: boolean
+end
+
+-- The installed binding exposes native ScriptParam objects on metaconstructions.
+global record ZigzagNativeTemplateParams
+    params: {ScriptParam}
 end
 
 global record ZigzagTemplateCaptureParams
