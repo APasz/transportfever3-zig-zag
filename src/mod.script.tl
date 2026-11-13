@@ -4,6 +4,9 @@ local debugLoggingEnabled = ug_require(
 local logging = ug_require(
     "apasz_zigzag::/zigzag/logging.lua"
 ) as ModLogging.Module
+local trackSelection = ug_require(
+    "apasz_zigzag::/zigzag/track_selection.lua"
+) as ZigzagTrackSelection
 
 local COST_MODE_PARAM_KEY = "apasz_zigzag_costs_enabled"
 local DEFAULT_COST_MODE_INDEX: integer = 3
@@ -53,6 +56,16 @@ local record CostCaptureParams
     platformCostProfiles: {ZigzagPlatformCostProfile}
 end
 
+local record TrackCatalog
+    profiles: {string: ZigzagTrackCostProfile}
+    choices: {ZigzagTrackChoice}
+end
+
+-- The installed native binding uses ScriptParam, unlike the serialized Teal definition.
+local record NativeTemplateParams
+    params: {ScriptParam}
+end
+
 local record ConstructionUpdateScript
     fileName: string
     params: any
@@ -88,11 +101,12 @@ local function isCostCaptureParams(params: DynamicTable): boolean
         and type(params.platformCostProfiles) == "table"
 end
 
-local function collectCostCaptureParams(
+local function collectCaptureParams<T>(
     value: any,
     depth: integer,
     visited: TableSet,
-    matches: {CostCaptureParams}
+    matches: {T},
+    isMatch: function(DynamicTable): boolean
 )
     local candidate = dynamicTable(value)
     if candidate == nil or depth > MAX_CAPTURE_PARAM_DEPTH then
@@ -103,31 +117,33 @@ local function collectCostCaptureParams(
         return
     end
     visited[current] = true
-    if isCostCaptureParams(current) then
-        matches[#matches + 1] = current as CostCaptureParams
+    if isMatch(current) then
+        matches[#matches + 1] = current as T
         return
     end
     for _, nestedValue in pairs(current) do
-        collectCostCaptureParams(nestedValue, depth + 1, visited, matches)
+        collectCaptureParams(nestedValue, depth + 1, visited, matches, isMatch)
     end
 end
 
-local function requireCostCaptureParams(
+local function requireCaptureParams<T>(
     rootParams: any,
-    updateScriptName: string
-): CostCaptureParams
-    local matches: {CostCaptureParams} = {}
-    collectCostCaptureParams(rootParams, 0, {}, matches)
+    scriptName: string,
+    context: string,
+    isMatch: function(DynamicTable): boolean
+): T
+    local matches: {T} = {}
+    collectCaptureParams(rootParams, 0, {}, matches, isMatch)
     if #matches == 0 then
         return logger.fail(
-            "could not locate Zigzag update parameters beneath "
-                .. updateScriptName
+            "could not locate Zigzag " .. context .. " parameters beneath "
+                .. scriptName
         )
     end
     if #matches > 1 then
         return logger.fail(
-            "found multiple Zigzag update parameter tables beneath "
-                .. updateScriptName
+            "found multiple Zigzag " .. context .. " parameter tables beneath "
+                .. scriptName
         )
     end
     return matches[1]
@@ -269,48 +285,79 @@ local function generatedTrackModuleName(trackTemplateName: string): string
     return "::/trainstation_" .. trackTemplateName:gsub("::", "__")
 end
 
-local function collectTrackCostProfiles(
+local function trackMenuOrder(template: StreetTemplate): number | nil
+    for _, category in ipairs(template.menuCategory.categories) do
+        if category.category == "tracks" then
+            return category.order
+        end
+    end
+    return nil
+end
+
+local function collectTrackCatalog(
+    mode: ZigzagCostMode,
     constructionScale: number,
     maintenanceScale: number
-): {string: ZigzagTrackCostProfile}
+): TrackCatalog
     local profiles: {string: ZigzagTrackCostProfile} = {}
-    for _, resourceName in pairs(api.res.streetTemplateRep.getAll()) do
-        local templateId = api.res.streetTemplateRep.find(resourceName)
-        if templateId ~= -1 then
-            local template = api.res.streetTemplateRep.get(templateId)
-            if template.roadType == api.type["enum"].RoadType.TRACK then
-                local perMetre = optionalCostRate(
-                    template.cost,
-                    template.maintenanceCost
-                )
-                if perMetre ~= nil then
-                    perMetre = removeAppliedScales(
-                        perMetre,
-                        constructionScale,
-                        maintenanceScale,
-                        resourceName
+    local choices: {ZigzagTrackChoice} = {}
+    -- Invisible templates can still be referenced by saved stations and upgrades.
+    for templateId, resourceName in pairs(api.res.streetTemplateRep.getAll(true)) do
+        local template = api.res.streetTemplateRep.get(templateId)
+        if trackSelection.isRailwayTrack(template) then
+            if mode ~= "NO_COST" then
+                local profile: ZigzagTrackCostProfile = {}
+                if mode == "TRACK_COST" then
+                    local rate = optionalCostRate(
+                        template.cost,
+                        template.maintenanceCost
                     )
+                    if rate ~= nil then
+                        profile.perMetre = removeAppliedScales(
+                            rate,
+                            constructionScale,
+                            maintenanceScale,
+                            resourceName
+                        )
+                    end
+                else
+                    local moduleName = generatedTrackModuleName(resourceName)
+                    local moduleId = api.res.moduleRep.find(moduleName)
+                    if moduleId ~= -1 then
+                        profile.perModule = optionalModuleCostRate(
+                            api.res.moduleRep.get(moduleId),
+                            constructionScale,
+                            moduleName
+                        )
+                    end
                 end
-                local moduleName = generatedTrackModuleName(resourceName)
-                local moduleId = api.res.moduleRep.find(moduleName)
-                local perModule: ZigzagCostRate | nil = nil
-                if moduleId ~= -1 then
-                    perModule = optionalModuleCostRate(
-                        api.res.moduleRep.get(moduleId),
-                        constructionScale,
-                        moduleName
-                    )
-                end
-                if perMetre ~= nil or perModule ~= nil then
-                    profiles[resourceName] = {
-                        perMetre = perMetre,
-                        perModule = perModule,
-                    }
-                end
+                profiles[resourceName] = profile
+            end
+            local order = trackMenuOrder(template)
+            if order ~= nil
+                and api.res.streetTemplateRep.isVisible(templateId)
+            then
+                choices[#choices + 1] = {
+                    resourceName = resourceName,
+                    name = template.description.name,
+                    order = order as number,
+                    yearFrom = template.availability.yearFrom,
+                    yearTo = template.availability.yearTo,
+                    electrified = trackSelection.supportsTransportMode(
+                        template,
+                        api.type["enum"].TransportMode.ELECTRIC_TRAIN
+                    ),
+                }
             end
         end
     end
-    return profiles
+    table.sort(choices, function(first: ZigzagTrackChoice, second: ZigzagTrackChoice): boolean
+        if first.order ~= second.order then
+            return first.order < second.order
+        end
+        return first.resourceName < second.resourceName
+    end)
+    return { profiles = profiles, choices = choices }
 end
 
 local function platformModuleName(prefix: string, era: string): string
@@ -367,22 +414,9 @@ local function infrastructureScale(
     )
 end
 
-local function perMetreRate(
-    profile: ZigzagTrackCostProfile
-): ZigzagCostRate | nil
-    return profile.perMetre
-end
-
-local function perModuleRate(
-    profile: ZigzagTrackCostProfile
-): ZigzagCostRate | nil
-    return profile.perModule
-end
-
 local function rateBounds(
-    trackProfiles: {string: ZigzagTrackCostProfile},
-    selectRate: function(ZigzagTrackCostProfile): ZigzagCostRate | nil,
-    missingMessage: string
+    catalog: TrackCatalog,
+    mode: ZigzagCostMode
 ): ZigzagCostRate, ZigzagCostRate
     local minimum: ZigzagCostRate = {
         construction = math.huge,
@@ -390,31 +424,29 @@ local function rateBounds(
     }
     local maximum: ZigzagCostRate = { construction = 0, maintenance = 0 }
     local found = false
-    for _, profile in pairs(trackProfiles) do
-        local rate = selectRate(profile)
-        if rate ~= nil then
-            local selectedRate = rate as ZigzagCostRate
-            minimum.construction = math.min(
-                minimum.construction,
-                selectedRate.construction
-            )
-            minimum.maintenance = math.min(
-                minimum.maintenance,
-                selectedRate.maintenance
-            )
-            maximum.construction = math.max(
-                maximum.construction,
-                selectedRate.construction
-            )
-            maximum.maintenance = math.max(
-                maximum.maintenance,
-                selectedRate.maintenance
-            )
-            found = true
-        end
+    for _, choice in ipairs(catalog.choices) do
+        local profile = catalog.profiles[choice.resourceName]
+        local selectedRate = trackSelection.costRate(profile, mode) or trackSelection.zeroCostRate
+        minimum.construction = math.min(
+            minimum.construction,
+            selectedRate.construction
+        )
+        minimum.maintenance = math.min(
+            minimum.maintenance,
+            selectedRate.maintenance
+        )
+        maximum.construction = math.max(
+            maximum.construction,
+            selectedRate.construction
+        )
+        maximum.maintenance = math.max(
+            maximum.maintenance,
+            selectedRate.maintenance
+        )
+        found = true
     end
     if not found then
-        return logger.fail(missingMessage)
+        return trackSelection.zeroCostRate, trackSelection.zeroCostRate
     end
     return minimum, maximum
 end
@@ -438,14 +470,14 @@ end
 
 local function costBounds(
     mode: ZigzagCostMode,
-    trackProfiles: {string: ZigzagTrackCostProfile},
+    catalog: TrackCatalog,
     platformProfiles: {ZigzagPlatformCostProfile},
     constructionScale: number,
     maintenanceScale: number,
     captureParams: CostCaptureParams
 ): CostBounds
     if mode == "NO_COST" then
-        local zero: ZigzagCostRate = { construction = 0, maintenance = 0 }
+        local zero = trackSelection.zeroCostRate
         return { minimum = zero, maximum = zero }
     end
 
@@ -468,9 +500,8 @@ local function costBounds(
 
     if mode == "TRACK_COST" then
         local minimumRate, maximumRate = rateBounds(
-            trackProfiles,
-            perMetreRate,
-            "no track templates have cost data"
+            catalog,
+            mode
         )
         return {
             minimum = {
@@ -501,9 +532,8 @@ local function costBounds(
     end
 
     local minimumRate, maximumRate = rateBounds(
-        trackProfiles,
-        perModuleRate,
-        "no generated track modules have cost data"
+        catalog,
+        mode
     )
     local moduleLength = requirePositiveNumber(
         captureParams.moduleLengthMetres,
@@ -542,6 +572,130 @@ local function costBounds(
     }
 end
 
+local function isTemplateCaptureParams(params: DynamicTable): boolean
+    return type(params.constructionName) == "string"
+        and type(params.tracks) == "table"
+end
+
+local function storeTemplatePeriods(
+    templateName: string,
+    templateId: integer,
+    template: MetaConstructionDesc,
+    trackParams: {ConstructionScriptParam}
+)
+    local periods: {ModelMetadata.Availability} = {}
+    for _, param in ipairs(trackParams) do
+        local previous = periods[#periods]
+        if previous ~= nil and previous.yearTo == param.yearFrom then
+            previous.yearTo = param.yearTo
+        else
+            periods[#periods + 1] = { yearFrom = param.yearFrom, yearTo = param.yearTo }
+        end
+    end
+    local firstPeriod = periods[1]
+    if firstPeriod ~= nil then
+        template.availability.yearFrom = firstPeriod.yearFrom
+        template.availability.yearTo = firstPeriod.yearTo
+    end
+    if firstPeriod == nil then
+        api.res.metaConstructionRep.setVisible(templateId, false)
+        return
+    end
+    -- Disjoint availability needs separate menu entries, as with vanilla station eras.
+    local visible = api.res.metaConstructionRep.isVisible(templateId)
+    for periodIndex = 2, #periods do
+        local period = periods[periodIndex]
+        local source = api.res.metaConstructionRep.get(templateId)
+        source.availability.yearFrom = period.yearFrom
+        source.availability.yearTo = period.yearTo
+        local variantName = templateName:gsub(
+            "%.metacon$",
+            "_period_" .. tostring(periodIndex) .. ".metacon"
+        )
+        local variantId = api.res.metaConstructionRep.add(
+            variantName,
+            source,
+            visible
+        )
+        if variantId == -1 then
+            logger.fail("could not add construction template " .. variantName)
+            return
+        end
+    end
+    -- Adding resources may invalidate native references into the repository.
+    local original = api.res.metaConstructionRep.get(templateId)
+    original.availability.yearFrom = firstPeriod.yearFrom
+    original.availability.yearTo = firstPeriod.yearTo
+end
+
+local function makeNativeTrackParam(param: ConstructionScriptParam): ScriptParam
+    local native = api.type.ScriptParam.new()
+    native.key = param.key
+    native.name = param.name
+    native.values = param.values
+    native.numbers = param.numbers
+    native.defaultIndex = param.defaultIndex
+    native.uiType = api.type["enum"].ScriptParamType.ComboBox
+    native.yearFrom = param.yearFrom
+    native.yearTo = param.yearTo
+    return native
+end
+
+local function configureTemplate(
+    constructionName: string,
+    catalog: TrackCatalog,
+    bounds: CostBounds
+)
+    local templateName = constructionName:gsub("%.con$", ".metacon")
+    local templateId = api.res.metaConstructionRep.find(templateName)
+    if templateId == -1 then
+        logger.fail("missing construction template " .. templateName)
+        return
+    end
+    local template = api.res.metaConstructionRep.get(templateId)
+    local existingScript = template.createTemplateScript
+    local rootParams = existingScript.params
+    local captureParams: ZigzagTemplateCaptureParams = requireCaptureParams(
+        rootParams,
+        existingScript.fileName,
+        "template",
+        isTemplateCaptureParams
+    )
+    captureParams.constructionName = constructionName
+    captureParams.tracks = catalog.choices
+    local scriptRef = api.type.ScriptRef.new()
+    scriptRef.fileName = existingScript.fileName
+    scriptRef.params = rootParams
+    template.createTemplateScript = scriptRef
+
+    local trackParams = trackSelection.makeParams(catalog.choices)
+    local nativeTemplate = template as NativeTemplateParams
+    local params: {ScriptParam} = {}
+    local replaced = false
+    for _, param in ipairs(nativeTemplate.params) do
+        if param.key == trackSelection.paramKey then
+            if not replaced then
+                for _, trackParam in ipairs(trackParams) do
+                    params[#params + 1] = makeNativeTrackParam(trackParam)
+                end
+                replaced = true
+            end
+        else
+            params[#params + 1] = param
+        end
+    end
+    if not replaced then
+        logger.fail("construction template track parameter was removed by another mod")
+        return
+    end
+    nativeTemplate.params = params
+
+    local attributes = template.description.attributes as CostAttributes
+    attributes.cost = { bounds.minimum.construction, bounds.maximum.construction }
+    attributes.maintenanceCost = { bounds.minimum.maintenance, bounds.maximum.maintenance }
+    storeTemplatePeriods(templateName, templateId, template, trackParams)
+end
+
 local function configureConstruction(
     mode: ZigzagCostMode,
     baseConfig: BaseConfig | nil
@@ -557,9 +711,11 @@ local function configureConstruction(
         construction as DynamicTable
     )
     local rootParams = existingUpdateScript.params
-    local params = requireCostCaptureParams(
+    local params: CostCaptureParams = requireCaptureParams(
         rootParams,
-        existingUpdateScript.fileName
+        existingUpdateScript.fileName,
+        "update",
+        isCostCaptureParams
     )
     local constructionScale = infrastructureScale(
         baseConfig,
@@ -571,20 +727,14 @@ local function configureConstruction(
         "infrastructureMaintenanceScale",
         "infrastructure maintenance scale"
     )
-    local trackProfiles: {string: ZigzagTrackCostProfile} = {}
-    if mode ~= "NO_COST" then
-        trackProfiles = collectTrackCostProfiles(
-            constructionScale,
-            maintenanceScale
-        )
-    end
+    local catalog = collectTrackCatalog(mode, constructionScale, maintenanceScale)
     local platformProfiles: {ZigzagPlatformCostProfile} = {}
     if mode == "STATION_COST" then
         platformProfiles = collectPlatformCostProfiles(constructionScale)
     end
 
     params.costMode = mode
-    params.trackCostProfiles = trackProfiles
+    params.trackCostProfiles = catalog.profiles
     params.platformCostProfiles = platformProfiles
 
     local updateScript = api.type.ScriptRef.new()
@@ -592,28 +742,15 @@ local function configureConstruction(
     updateScript.params = rootParams as table
     construction.updateScript = updateScript
 
-    local template = construction.constructionTemplates[1]
-    if template == nil then
-        logger.fail("construction has no template")
-        return
-    end
     local bounds = costBounds(
         mode,
-        trackProfiles,
+        catalog,
         platformProfiles,
         constructionScale,
         maintenanceScale,
         params
     )
-    local attributes = template.desc.attributes as CostAttributes
-    attributes.cost = {
-        bounds.minimum.construction,
-        bounds.maximum.construction,
-    }
-    attributes.maintenanceCost = {
-        bounds.minimum.maintenance,
-        bounds.maximum.maintenance,
-    }
+    configureTemplate(constructionName, catalog, bounds)
     logger.info("Configured cost mode " .. mode)
 end
 

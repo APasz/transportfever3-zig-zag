@@ -11,8 +11,8 @@
     "tags": [
         "Rail Station"
     ],
-    "url": "https://mod.io/g/transportfever3/m/zigzag-station",
-    "url_repo": "https://github.com/APasz/transportfever3-zig-zag",
+    "url": "https://github.com/APasz/transportfever3-zig-zag",
+    "url_modio": "https://mod.io/g/transportfever3/m/zigzag-station",
     "localization": {
         "de": {
             "name": "Zigzag Station",

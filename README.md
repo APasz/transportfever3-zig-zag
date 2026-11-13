@@ -17,8 +17,9 @@ A platform-free railway station for reversing trains and building switchback or 
 - Four construction and maintenance cost models: no cost, selected-track cost, equivalent
   vanilla track-module cost, or track-module cost plus matching passenger/cargo platforms.
   New games default to module cost; old Off/On configurations migrate to No Cost/Track Cost.
-- Vanilla track type, high-speed track, and catenary options during construction.
-- Compatible track mods can be applied afterwards with the normal track-upgrade tool.
+- Select visible vanilla and modded tracks during construction, including electrified and
+  third-rail variants, respecting their availability years and native menu order.
+- Track mods can also be applied afterwards with the normal track-upgrade tool.
 - Track upgrades apply to every track in a Zigzag Station together.
 - Track upgrades derive and persist the selected template's electric capability, including
   third-rail and other always-electric tracks.
@@ -28,6 +29,13 @@ A platform-free railway station for reversing trains and building switchback or 
 
 The station does not explicitly command a train to reverse. Transport Fever's route solver reverses the train when the next leg of its line requires departure in the opposite direction.
 
+Load Zigzag after track packs and cost mods so its initial picker and cost snapshot include
+their final changes. New placements default to the first available track in native menu order.
+Existing stations retain their exact track when a mod hides it or it becomes unavailable for
+new construction. Missing track or track-module cost data produces one warning per track and
+cost type, with zero construction and maintenance costs for that track contribution. Explicit
+zero prices are accepted without warnings; Station Cost still includes enabled platform costs.
+
 ## Development
 
 Generate runtime Lua and run the regression tests with:
@@ -36,7 +44,11 @@ Generate runtime Lua and run the regression tests with:
 tl gen -c -o content/mod.script.lua src/mod.script.tl
 tl gen -c -o content/zigzag/logging_config.lua src/zigzag/logging_config.tl
 tl gen -c -o content/zigzag/construction_path.lua src/zigzag/construction_path.tl
+tl gen -c -o content/zigzag/track_selection.lua src/zigzag/track_selection.tl
+tl gen -c -o content/zigzag/station_definition.lua src/zigzag/station_definition.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.con.lua src/stations/rail/zigzag/zigzag.con.tl
+tl gen -c -o content/stations/rail/zigzag/zigzag.metacon.lua src/stations/rail/zigzag/zigzag.metacon.tl
+tl gen -c -o content/stations/rail/zigzag/zigzag.template.script.lua src/stations/rail/zigzag/zigzag.template.script.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.params.gui.lua src/stations/rail/zigzag/zigzag.params.gui.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.window.script.lua src/stations/rail/zigzag/zigzag.window.script.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.selection.gs.lua src/stations/rail/zigzag/zigzag.selection.gs.tl
@@ -50,6 +62,20 @@ with `apasz_zigzag_` to avoid collisions with other mods.
 
 Runtime logging uses the shared `_logging` module. Debug logging is disabled by default in
 `src/zigzag/logging_config.tl`.
+
+The metaconstruction picker saves `streetTemplate` and the track's electric capability into
+the placed construction. Picker indices are transient; legacy `trackType` indices retain their
+original vanilla mapping. The post-run catalogue includes invisible templates for saved stations
+and upgrades, while the picker only offers visible railway templates in the native track menu.
+Only the selected pricing model is captured, once, and looked up without resource API calls
+during construction updates. The picker and upgrades share the same train-capable railway
+check. Definition values and controls are shared by the legacy construction and new template.
+
+The track tests cover hidden vanilla and modded templates, third rail, availability boundaries,
+saved identity after catalogue reordering, wrapped scripts, zero-price fallbacks, cost scaling,
+rejected tram-only upgrades, and avoiding unused pricing reads.
+In-game verification should include NEP³ before Zigzag, a save with existing Zigzag stations,
+new placements with several track variants, and catenary and track upgrades after reloading.
 
 Selecting a frozen Zigzag track forwards the native selection event to its owning construction.
 The construction's window hook then supplies vanilla station-group content and renames the

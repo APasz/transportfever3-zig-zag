@@ -1,8 +1,11 @@
-local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local math = _tl_compat and _tl_compat.math or math; local pairs = _tl_compat and _tl_compat.pairs or pairs; local string = _tl_compat and _tl_compat.string or string; local debugLoggingEnabled = ug_require(
+local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local math = _tl_compat and _tl_compat.math or math; local pairs = _tl_compat and _tl_compat.pairs or pairs; local string = _tl_compat and _tl_compat.string or string; local table = _tl_compat and _tl_compat.table or table; local debugLoggingEnabled = ug_require(
 "apasz_zigzag::/zigzag/logging_config.lua")
 
 local logging = ug_require(
 "apasz_zigzag::/zigzag/logging.lua")
+
+local trackSelection = ug_require(
+"apasz_zigzag::/zigzag/track_selection.lua")
 
 
 local COST_MODE_PARAM_KEY = "apasz_zigzag_costs_enabled"
@@ -23,6 +26,16 @@ local COST_MODES = {
    "MODULE_COST",
    "STATION_COST",
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -88,11 +101,12 @@ local function isCostCaptureParams(params)
    type(params.platformCostProfiles) == "table"
 end
 
-local function collectCostCaptureParams(
+local function collectCaptureParams(
    value,
    depth,
    visited,
-   matches)
+   matches,
+   isMatch)
 
    local candidate = dynamicTable(value)
    if candidate == nil or depth > MAX_CAPTURE_PARAM_DEPTH then
@@ -103,31 +117,33 @@ local function collectCostCaptureParams(
       return
    end
    visited[current] = true
-   if isCostCaptureParams(current) then
+   if isMatch(current) then
       matches[#matches + 1] = current
       return
    end
    for _, nestedValue in pairs(current) do
-      collectCostCaptureParams(nestedValue, depth + 1, visited, matches)
+      collectCaptureParams(nestedValue, depth + 1, visited, matches, isMatch)
    end
 end
 
-local function requireCostCaptureParams(
+local function requireCaptureParams(
    rootParams,
-   updateScriptName)
+   scriptName,
+   context,
+   isMatch)
 
    local matches = {}
-   collectCostCaptureParams(rootParams, 0, {}, matches)
+   collectCaptureParams(rootParams, 0, {}, matches, isMatch)
    if #matches == 0 then
       return logger.fail(
-      "could not locate Zigzag update parameters beneath " ..
-      updateScriptName)
+      "could not locate Zigzag " .. context .. " parameters beneath " ..
+      scriptName)
 
    end
    if #matches > 1 then
       return logger.fail(
-      "found multiple Zigzag update parameter tables beneath " ..
-      updateScriptName)
+      "found multiple Zigzag " .. context .. " parameter tables beneath " ..
+      scriptName)
 
    end
    return matches[1]
@@ -269,48 +285,79 @@ local function generatedTrackModuleName(trackTemplateName)
    return "::/trainstation_" .. trackTemplateName:gsub("::", "__")
 end
 
-local function collectTrackCostProfiles(
+local function trackMenuOrder(template)
+   for _, category in ipairs(template.menuCategory.categories) do
+      if category.category == "tracks" then
+         return category.order
+      end
+   end
+   return nil
+end
+
+local function collectTrackCatalog(
+   mode,
    constructionScale,
    maintenanceScale)
 
    local profiles = {}
-   for _, resourceName in pairs(api.res.streetTemplateRep.getAll()) do
-      local templateId = api.res.streetTemplateRep.find(resourceName)
-      if templateId ~= -1 then
-         local template = api.res.streetTemplateRep.get(templateId)
-         if template.roadType == api.type["enum"].RoadType.TRACK then
-            local perMetre = optionalCostRate(
-            template.cost,
-            template.maintenanceCost)
+   local choices = {}
 
-            if perMetre ~= nil then
-               perMetre = removeAppliedScales(
-               perMetre,
-               constructionScale,
-               maintenanceScale,
-               resourceName)
+   for templateId, resourceName in pairs(api.res.streetTemplateRep.getAll(true)) do
+      local template = api.res.streetTemplateRep.get(templateId)
+      if trackSelection.isRailwayTrack(template) then
+         if mode ~= "NO_COST" then
+            local profile = {}
+            if mode == "TRACK_COST" then
+               local rate = optionalCostRate(
+               template.cost,
+               template.maintenanceCost)
 
-            end
-            local moduleName = generatedTrackModuleName(resourceName)
-            local moduleId = api.res.moduleRep.find(moduleName)
-            local perModule = nil
-            if moduleId ~= -1 then
-               perModule = optionalModuleCostRate(
-               api.res.moduleRep.get(moduleId),
-               constructionScale,
-               moduleName)
+               if rate ~= nil then
+                  profile.perMetre = removeAppliedScales(
+                  rate,
+                  constructionScale,
+                  maintenanceScale,
+                  resourceName)
 
+               end
+            else
+               local moduleName = generatedTrackModuleName(resourceName)
+               local moduleId = api.res.moduleRep.find(moduleName)
+               if moduleId ~= -1 then
+                  profile.perModule = optionalModuleCostRate(
+                  api.res.moduleRep.get(moduleId),
+                  constructionScale,
+                  moduleName)
+
+               end
             end
-            if perMetre ~= nil or perModule ~= nil then
-               profiles[resourceName] = {
-                  perMetre = perMetre,
-                  perModule = perModule,
-               }
-            end
+            profiles[resourceName] = profile
+         end
+         local order = trackMenuOrder(template)
+         if order ~= nil and
+            api.res.streetTemplateRep.isVisible(templateId) then
+
+            choices[#choices + 1] = {
+               resourceName = resourceName,
+               name = template.description.name,
+               order = order,
+               yearFrom = template.availability.yearFrom,
+               yearTo = template.availability.yearTo,
+               electrified = trackSelection.supportsTransportMode(
+               template,
+               api.type["enum"].TransportMode.ELECTRIC_TRAIN),
+
+            }
          end
       end
    end
-   return profiles
+   table.sort(choices, function(first, second)
+      if first.order ~= second.order then
+         return first.order < second.order
+      end
+      return first.resourceName < second.resourceName
+   end)
+   return { profiles = profiles, choices = choices }
 end
 
 local function platformModuleName(prefix, era)
@@ -367,22 +414,9 @@ local function infrastructureScale(
 
 end
 
-local function perMetreRate(
-   profile)
-
-   return profile.perMetre
-end
-
-local function perModuleRate(
-   profile)
-
-   return profile.perModule
-end
-
 local function rateBounds(
-   trackProfiles,
-   selectRate,
-   missingMessage)
+   catalog,
+   mode)
 
    local minimum = {
       construction = math.huge,
@@ -390,31 +424,29 @@ local function rateBounds(
    }
    local maximum = { construction = 0, maintenance = 0 }
    local found = false
-   for _, profile in pairs(trackProfiles) do
-      local rate = selectRate(profile)
-      if rate ~= nil then
-         local selectedRate = rate
-         minimum.construction = math.min(
-         minimum.construction,
-         selectedRate.construction)
+   for _, choice in ipairs(catalog.choices) do
+      local profile = catalog.profiles[choice.resourceName]
+      local selectedRate = trackSelection.costRate(profile, mode) or trackSelection.zeroCostRate
+      minimum.construction = math.min(
+      minimum.construction,
+      selectedRate.construction)
 
-         minimum.maintenance = math.min(
-         minimum.maintenance,
-         selectedRate.maintenance)
+      minimum.maintenance = math.min(
+      minimum.maintenance,
+      selectedRate.maintenance)
 
-         maximum.construction = math.max(
-         maximum.construction,
-         selectedRate.construction)
+      maximum.construction = math.max(
+      maximum.construction,
+      selectedRate.construction)
 
-         maximum.maintenance = math.max(
-         maximum.maintenance,
-         selectedRate.maintenance)
+      maximum.maintenance = math.max(
+      maximum.maintenance,
+      selectedRate.maintenance)
 
-         found = true
-      end
+      found = true
    end
    if not found then
-      return logger.fail(missingMessage)
+      return trackSelection.zeroCostRate, trackSelection.zeroCostRate
    end
    return minimum, maximum
 end
@@ -438,14 +470,14 @@ end
 
 local function costBounds(
    mode,
-   trackProfiles,
+   catalog,
    platformProfiles,
    constructionScale,
    maintenanceScale,
    captureParams)
 
    if mode == "NO_COST" then
-      local zero = { construction = 0, maintenance = 0 }
+      local zero = trackSelection.zeroCostRate
       return { minimum = zero, maximum = zero }
    end
 
@@ -468,9 +500,8 @@ local function costBounds(
 
    if mode == "TRACK_COST" then
       local minimumRate, maximumRate = rateBounds(
-      trackProfiles,
-      perMetreRate,
-      "no track templates have cost data")
+      catalog,
+      mode)
 
       return {
          minimum = {
@@ -501,9 +532,8 @@ local function costBounds(
    end
 
    local minimumRate, maximumRate = rateBounds(
-   trackProfiles,
-   perModuleRate,
-   "no generated track modules have cost data")
+   catalog,
+   mode)
 
    local moduleLength = requirePositiveNumber(
    captureParams.moduleLengthMetres,
@@ -542,6 +572,130 @@ local function costBounds(
    }
 end
 
+local function isTemplateCaptureParams(params)
+   return type(params.constructionName) == "string" and
+   type(params.tracks) == "table"
+end
+
+local function storeTemplatePeriods(
+   templateName,
+   templateId,
+   template,
+   trackParams)
+
+   local periods = {}
+   for _, param in ipairs(trackParams) do
+      local previous = periods[#periods]
+      if previous ~= nil and previous.yearTo == param.yearFrom then
+         previous.yearTo = param.yearTo
+      else
+         periods[#periods + 1] = { yearFrom = param.yearFrom, yearTo = param.yearTo }
+      end
+   end
+   local firstPeriod = periods[1]
+   if firstPeriod ~= nil then
+      template.availability.yearFrom = firstPeriod.yearFrom
+      template.availability.yearTo = firstPeriod.yearTo
+   end
+   if firstPeriod == nil then
+      api.res.metaConstructionRep.setVisible(templateId, false)
+      return
+   end
+
+   local visible = api.res.metaConstructionRep.isVisible(templateId)
+   for periodIndex = 2, #periods do
+      local period = periods[periodIndex]
+      local source = api.res.metaConstructionRep.get(templateId)
+      source.availability.yearFrom = period.yearFrom
+      source.availability.yearTo = period.yearTo
+      local variantName = templateName:gsub(
+      "%.metacon$",
+      "_period_" .. tostring(periodIndex) .. ".metacon")
+
+      local variantId = api.res.metaConstructionRep.add(
+      variantName,
+      source,
+      visible)
+
+      if variantId == -1 then
+         logger.fail("could not add construction template " .. variantName)
+         return
+      end
+   end
+
+   local original = api.res.metaConstructionRep.get(templateId)
+   original.availability.yearFrom = firstPeriod.yearFrom
+   original.availability.yearTo = firstPeriod.yearTo
+end
+
+local function makeNativeTrackParam(param)
+   local native = api.type.ScriptParam.new()
+   native.key = param.key
+   native.name = param.name
+   native.values = param.values
+   native.numbers = param.numbers
+   native.defaultIndex = param.defaultIndex
+   native.uiType = api.type["enum"].ScriptParamType.ComboBox
+   native.yearFrom = param.yearFrom
+   native.yearTo = param.yearTo
+   return native
+end
+
+local function configureTemplate(
+   constructionName,
+   catalog,
+   bounds)
+
+   local templateName = constructionName:gsub("%.con$", ".metacon")
+   local templateId = api.res.metaConstructionRep.find(templateName)
+   if templateId == -1 then
+      logger.fail("missing construction template " .. templateName)
+      return
+   end
+   local template = api.res.metaConstructionRep.get(templateId)
+   local existingScript = template.createTemplateScript
+   local rootParams = existingScript.params
+   local captureParams = requireCaptureParams(
+   rootParams,
+   existingScript.fileName,
+   "template",
+   isTemplateCaptureParams)
+
+   captureParams.constructionName = constructionName
+   captureParams.tracks = catalog.choices
+   local scriptRef = api.type.ScriptRef.new()
+   scriptRef.fileName = existingScript.fileName
+   scriptRef.params = rootParams
+   template.createTemplateScript = scriptRef
+
+   local trackParams = trackSelection.makeParams(catalog.choices)
+   local nativeTemplate = template
+   local params = {}
+   local replaced = false
+   for _, param in ipairs(nativeTemplate.params) do
+      if param.key == trackSelection.paramKey then
+         if not replaced then
+            for _, trackParam in ipairs(trackParams) do
+               params[#params + 1] = makeNativeTrackParam(trackParam)
+            end
+            replaced = true
+         end
+      else
+         params[#params + 1] = param
+      end
+   end
+   if not replaced then
+      logger.fail("construction template track parameter was removed by another mod")
+      return
+   end
+   nativeTemplate.params = params
+
+   local attributes = template.description.attributes
+   attributes.cost = { bounds.minimum.construction, bounds.maximum.construction }
+   attributes.maintenanceCost = { bounds.minimum.maintenance, bounds.maximum.maintenance }
+   storeTemplatePeriods(templateName, templateId, template, trackParams)
+end
+
 local function configureConstruction(
    mode,
    baseConfig)
@@ -557,9 +711,11 @@ local function configureConstruction(
    construction)
 
    local rootParams = existingUpdateScript.params
-   local params = requireCostCaptureParams(
+   local params = requireCaptureParams(
    rootParams,
-   existingUpdateScript.fileName)
+   existingUpdateScript.fileName,
+   "update",
+   isCostCaptureParams)
 
    local constructionScale = infrastructureScale(
    baseConfig,
@@ -571,20 +727,14 @@ local function configureConstruction(
    "infrastructureMaintenanceScale",
    "infrastructure maintenance scale")
 
-   local trackProfiles = {}
-   if mode ~= "NO_COST" then
-      trackProfiles = collectTrackCostProfiles(
-      constructionScale,
-      maintenanceScale)
-
-   end
+   local catalog = collectTrackCatalog(mode, constructionScale, maintenanceScale)
    local platformProfiles = {}
    if mode == "STATION_COST" then
       platformProfiles = collectPlatformCostProfiles(constructionScale)
    end
 
    params.costMode = mode
-   params.trackCostProfiles = trackProfiles
+   params.trackCostProfiles = catalog.profiles
    params.platformCostProfiles = platformProfiles
 
    local updateScript = api.type.ScriptRef.new()
@@ -592,28 +742,15 @@ local function configureConstruction(
    updateScript.params = rootParams
    construction.updateScript = updateScript
 
-   local template = construction.constructionTemplates[1]
-   if template == nil then
-      logger.fail("construction has no template")
-      return
-   end
    local bounds = costBounds(
    mode,
-   trackProfiles,
+   catalog,
    platformProfiles,
    constructionScale,
    maintenanceScale,
    params)
 
-   local attributes = template.desc.attributes
-   attributes.cost = {
-      bounds.minimum.construction,
-      bounds.maximum.construction,
-   }
-   attributes.maintenanceCost = {
-      bounds.minimum.maintenance,
-      bounds.maximum.maintenance,
-   }
+   configureTemplate(constructionName, catalog, bounds)
    logger.info("Configured cost mode " .. mode)
 end
 

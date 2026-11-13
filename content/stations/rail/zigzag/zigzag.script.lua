@@ -1,8 +1,14 @@
 local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local math = _tl_compat and _tl_compat.math or math; local lane_util = ug_require("::/scripts/construction/laneutil.lua")
 local param_util = ug_require("::/scripts/construction/param_util.tl")
+local trackSelection = ug_require(
+"apasz_zigzag::/zigzag/track_selection.lua")
 
-local CATENARY_DISABLED_INDEX = 1
-local CATENARY_ENABLED_INDEX = 2
+local logging = ug_require(
+"apasz_zigzag::/zigzag/logging.lua")
+
+local logger = logging.new("Zigzag Station", false)
+
+local requireCatenaryEnabled = trackSelection.catenaryEnabled
 local SNAP_ANGLE_DEGREES = 60
 local NODES_PER_TRACK = 8
 local NEGATIVE_SNAP_NODE_OFFSET = 0
@@ -122,21 +128,6 @@ local PASSENGER_CAPACITY_PER_METRE = 1.7
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 local function addCost(
    total,
    rate,
@@ -146,15 +137,22 @@ local function addCost(
    total.maintenance = total.maintenance + rate.maintenance * quantity
 end
 
-local function requireTrackCostProfile(
+local function trackCostRate(
    captureParams,
    trackType)
 
    local profile = captureParams.trackCostProfiles[trackType]
-   if profile == nil then
-      error("Zigzag Station has no cost profile for track " .. trackType)
+   local rate = trackSelection.costRate(profile, captureParams.costMode)
+   if rate ~= nil then
+      return rate
    end
-   return profile
+   local costType = captureParams.costMode == "TRACK_COST" and "per-metre" or "generated module"
+   logger.warnOnce(
+   costType .. ":" .. trackType,
+   "Missing or invalid " .. costType .. " cost for track " .. trackType ..
+   "; using zero track construction and maintenance costs")
+
+   return trackSelection.zeroCostRate
 end
 
 local function requirePlatformCostProfile(
@@ -189,16 +187,12 @@ local function calculateCosts(
 
    local mode = captureParams.costMode
    if mode == "NO_COST" then
-      return { construction = 0, maintenance = 0 }
+      return trackSelection.zeroCostRate
    end
 
-   local profile = requireTrackCostProfile(captureParams, trackType)
    local total = { construction = 0, maintenance = 0 }
    if mode == "TRACK_COST" then
-      local trackRate = profile.perMetre
-      if trackRate == nil then
-         error("Zigzag Station has no per-metre cost for track " .. trackType)
-      end
+      local trackRate = trackCostRate(captureParams, trackType)
       addCost(total, trackRate, length * trackCount)
       return total
    end
@@ -206,10 +200,7 @@ local function calculateCosts(
       error("Zigzag Station received invalid cost mode " .. tostring(mode))
    end
 
-   local trackModuleRate = profile.perModule
-   if trackModuleRate == nil then
-      error("Zigzag Station has no generated module cost for track " .. trackType)
-   end
+   local trackModuleRate = trackCostRate(captureParams, trackType)
    if captureParams.moduleLengthMetres <= 0 then
       error("Zigzag Station requires a positive module length")
    end
@@ -401,20 +392,8 @@ local function requireStreetTemplate(resourceName)
    return api.res.streetTemplateRep.findAndGet(resourceName)
 end
 
-local function supportsTransportMode(
-   streetTemplate,
-   transportMode)
-
-   for _, laneConfig in ipairs(streetTemplate.laneConfigs) do
-      if laneConfig.transportModes[transportMode] then
-         return true
-      end
-   end
-   return false
-end
-
 local function isElectrifiedTrack(streetTemplate)
-   return supportsTransportMode(
+   return trackSelection.supportsTransportMode(
    streetTemplate,
    api.type["enum"].TransportMode.ELECTRIC_TRAIN)
 
@@ -428,14 +407,6 @@ local function makeTrackTransportModes(
       transportModes[#transportModes + 1] = "ELECTRIC_TRAIN"
    end
    return transportModes
-end
-
-local function requireCatenaryEnabled(catenaryIndex)
-   local catenary = catenaryIndex or CATENARY_DISABLED_INDEX
-   if catenary ~= CATENARY_DISABLED_INDEX and catenary ~= CATENARY_ENABLED_INDEX then
-      error("Zigzag Station received invalid catenary index " .. tostring(catenary))
-   end
-   return catenary == CATENARY_ENABLED_INDEX
 end
 
 local function requireTrackType(
@@ -991,7 +962,7 @@ local function isAffectedByToolFn(
 
    if conConfigAdd.streetTemplate ~= nil then
       local streetTemplate = requireStreetTemplate(conConfigAdd.streetTemplate)
-      return streetTemplate.roadType == api.type["enum"].RoadType.TRACK
+      return trackSelection.isRailwayTrack(streetTemplate)
    end
 
    if conConfigAdd.catenary == nil and conConfigRemove.catenary == nil then
@@ -1020,13 +991,11 @@ local function upgradeFn(
          requireCatenaryEnabled(constructionConfig.catenary)
       end
       local streetTemplate = requireStreetTemplate(constructionConfig.streetTemplate)
-      if streetTemplate.roadType ~= api.type["enum"].RoadType.TRACK then
-         error("Zigzag Station cannot use a non-track street template")
+      if not trackSelection.isRailwayTrack(streetTemplate) then
+         error("Zigzag Station requires a train-capable railway template")
       end
       params.streetTemplate = constructionConfig.streetTemplate
-      params.catenary = isElectrifiedTrack(streetTemplate) and
-      CATENARY_ENABLED_INDEX or
-      CATENARY_DISABLED_INDEX
+      params.catenary = trackSelection.catenaryIndex(isElectrifiedTrack(streetTemplate))
    elseif constructionConfig.catenary ~= nil then
       local catenaryEnabled = requireCatenaryEnabled(constructionConfig.catenary)
       local currentCatenaryEnabled = requireCatenaryEnabled(params.catenary)
@@ -1044,7 +1013,7 @@ local function upgradeFn(
       local upgradedTrackType = getCatenaryReplacement(streetTemplate, catenaryEnabled)
       if upgradedTrackType ~= nil then
          local upgradedStreetTemplate = requireStreetTemplate(upgradedTrackType)
-         if upgradedStreetTemplate.roadType ~= api.type["enum"].RoadType.TRACK or
+         if not trackSelection.isRailwayTrack(upgradedStreetTemplate) or
             isElectrifiedTrack(upgradedStreetTemplate) ~= catenaryEnabled then
             error("Track template " .. trackType .. " has an invalid catenary replacement")
          end

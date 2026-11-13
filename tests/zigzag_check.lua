@@ -1,3 +1,10 @@
+local loggedWarnings = {}
+_G.log = {
+    warning = function(message)
+        loggedWarnings[#loggedWarnings + 1] = message
+    end,
+}
+
 local function assertEqual(actual, expected, context)
     if actual ~= expected then
         error(string.format("%s: expected %s, got %s", context, tostring(expected), tostring(actual)))
@@ -198,6 +205,12 @@ package.preload["::/scripts/construction/laneutil.lua"] = function()
     }
 end
 
+for _, moduleName in ipairs({ "track_selection", "station_definition" }) do
+    package.preload["apasz_zigzag::/zigzag/" .. moduleName .. ".lua"] = function()
+        return assert(loadfile("content/zigzag/" .. moduleName .. ".lua"))()
+    end
+end
+
 package.preload["apasz_zigzag::/zigzag/logging_config.lua"] = function()
     return false
 end
@@ -259,6 +272,12 @@ local templates = {
     ["other_mod::/modded.track"] = makeTrackTemplate(false, nil, nil, 225, 35),
     ["zero_cost.track"] = makeTrackTemplate(false, nil, nil, 0, 0),
     ["malformed_module.track"] = makeTrackTemplate(false, nil, nil, 210, 31),
+    ["tram_only.track"] = {
+        roadType = 0,
+        laneConfigs = { { transportModes = { TRAM_TRACK = true } } },
+        cost = 50,
+        maintenanceCost = 5,
+    },
     ["::/industries/shared/industry_track/industry.street_template"] =
         makeTrackTemplate(false, nil, nil, 0, nil),
     ["road.street"] = {
@@ -266,6 +285,23 @@ local templates = {
         laneConfigs = {},
     },
 }
+
+local templateResourceNames = {}
+local templateIds = {}
+local hiddenTemplates = {}
+for resourceName, template in pairs(templates) do
+    templateResourceNames[#templateResourceNames + 1] = resourceName
+    template.description = { name = resourceName, icon = resourceName .. ".tga" }
+    template.availability = { yearFrom = 0, yearTo = 0 }
+    template.menuCategory = {
+        categories = template.roadType == 0 and { { category = "tracks", order = 0 } } or {},
+    }
+end
+table.sort(templateResourceNames)
+for index, resourceName in ipairs(templateResourceNames) do
+    templateIds[resourceName] = index - 1
+end
+templates["::/industries/shared/industry_track/industry.street_template"].menuCategory.categories = {}
 
 local activeInfrastructureCostScale = 1
 local activeInfrastructureMaintenanceScale = 1
@@ -301,10 +337,13 @@ local gameApi = {
     res = {
         streetTemplateRep = {
             find = function(resourceName)
-                return resourceName
+                return templateIds[resourceName] or -1
             end,
-            get = function(resourceName)
-                return scaledTrackTemplate(resourceName)
+            get = function(templateId)
+                return scaledTrackTemplate(assert(templateResourceNames[templateId + 1]))
+            end,
+            isVisible = function(templateId)
+                return not hiddenTemplates[assert(templateResourceNames[templateId + 1])]
             end,
             findAndGet = function(resourceName)
                 return assert(templates[resourceName], "unknown template " .. tostring(resourceName))
@@ -322,6 +361,7 @@ end
 
 _G.api = nil
 local construction = loadData("content/stations/rail/zigzag/zigzag.con.lua")
+local constructionTemplate = loadData("content/stations/rail/zigzag/zigzag.metacon.lua")
 local expectedLengthsMetres = {
     5, 10, 20, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440,
 }
@@ -353,19 +393,20 @@ assertEqual(
     "apasz_zigzag_description",
     "construction description localization key"
 )
-assertEqual(#construction.constructionTemplates, 1, "template count")
+assertEqual(construction.constructionTemplates, nil, "legacy construction has no duplicate build entry")
+assertEqual(construction.createTemplateScript, nil, "new builds use the standalone metaconstruction")
 assertEqual(
-    construction.constructionTemplates[1].configureHudIconsScript.params.cargo,
+    constructionTemplate.configureHudIconsScript.params.cargo,
     true,
     "cargo placement HUD icons"
 )
-assertEqual(construction.constructionTemplates[1].description.icon, "zigzag.tga", "menu icon")
+assertEqual(constructionTemplate.description.icon, "zigzag.tga", "menu icon")
 assertEqual(
-    construction.constructionTemplates[1].description.previewIcon,
+    constructionTemplate.description.previewIcon,
     "zigzag_preview.tga",
     "menu preview icon"
 )
-assertEqual(#construction.constructionTemplates[1].data.params, 0, "template-specific parameter count")
+assertEqual(#constructionTemplate.params, 8, "build-template parameter count")
 assertEqual(#construction.params[1].values, #expectedTrackCounts, "track-count option count")
 assertEqual(construction.params[1].name, "apasz_zigzag_tracks", "tracks localization key")
 assertEqual(construction.params[1].defaultIndex, 1, "default one-track index")
@@ -768,7 +809,7 @@ do
     _G.api = nil
 end
 
-local templateAttributes = construction.constructionTemplates[1].description.attributes
+local templateAttributes = constructionTemplate.description.attributes
 assertEqual(templateAttributes.cost[1], 0, "unconfigured minimum displayed cost")
 assertEqual(templateAttributes.cost[2], 0, "unconfigured maximum displayed cost")
 assertEqual(templateAttributes.maintenanceCost[1], 0, "unconfigured minimum displayed maintenance")
@@ -885,13 +926,17 @@ for index, multiplier in ipairs(expectedPassengerCapacityMultipliers) do
     )
 end
 
-local function runRestrictedUpdateWithCapture(updateCaptureParams, params)
+local function runRestrictedCallback(callback, updateCaptureParams, params)
     local resourceApi = _G.api.res
     _G.api.res = nil
-    local ok, resultOrError = pcall(script.updateFn, updateCaptureParams, params)
+    local ok, resultOrError = pcall(callback, updateCaptureParams, params)
     _G.api.res = resourceApi
     assert(ok, resultOrError)
     return resultOrError
+end
+
+local function runRestrictedUpdateWithCapture(updateCaptureParams, params)
+    return runRestrictedCallback(script.updateFn, updateCaptureParams, params)
 end
 
 local function runRestrictedUpdate(params)
@@ -1295,48 +1340,28 @@ missingTrackModuleCapture.trackCostProfiles["custom.track"] = {
     perMetre = captureParams.trackCostProfiles["custom.track"].perMetre,
     perModule = nil,
 }
-local missingTrackModuleOk, missingTrackModuleError = pcall(
-    script.updateFn,
+local missingTrackModuleResult = runRestrictedUpdateWithCapture(
     missingTrackModuleCapture,
-    {
-        streetTemplate = "custom.track",
-        catenary = 1,
-    }
+    { streetTemplate = "custom.track", catenary = 1 }
 )
-assertEqual(missingTrackModuleOk, false, "missing generated track-module cost rejection")
-assertEqual(
-    string.find(
-        tostring(missingTrackModuleError),
-        "no generated module cost for track custom.track",
-        1,
-        true
-    ) ~= nil,
-    true,
-    "missing generated track-module error context"
-)
+assertEqual(missingTrackModuleResult.cost, 0, "missing module price falls back to zero")
+assertEqual(missingTrackModuleResult.maintenanceCost, 0, "missing module maintenance falls back to zero")
+assertEqual(#loggedWarnings, 1, "missing module price is logged")
+assert(loggedWarnings[1]:find("custom.track", 1, true), "missing module log names the track")
+runRestrictedUpdateWithCapture(missingTrackModuleCapture, { streetTemplate = "custom.track", catenary = 1 })
+assertEqual(#loggedWarnings, 1, "preview updates do not repeat missing module warnings")
 
 local missingPerMetreCapture = captureWithCostMode("TRACK_COST")
 local incompleteTrackName =
     "::/industries/shared/industry_track/industry.street_template"
-local missingPerMetreOk, missingPerMetreError = pcall(
-    script.updateFn,
+local missingPerMetreResult = runRestrictedUpdateWithCapture(
     missingPerMetreCapture,
-    {
-        streetTemplate = incompleteTrackName,
-        catenary = 1,
-    }
+    { streetTemplate = incompleteTrackName, catenary = 1 }
 )
-assertEqual(missingPerMetreOk, false, "missing per-metre track cost rejection")
-assertEqual(
-    string.find(
-        tostring(missingPerMetreError),
-        "no per-metre cost for track " .. incompleteTrackName,
-        1,
-        true
-    ) ~= nil,
-    true,
-    "missing per-metre track cost error context"
-)
+assertEqual(missingPerMetreResult.cost, 0, "missing per-metre price falls back to zero")
+assertEqual(missingPerMetreResult.maintenanceCost, 0, "missing per-metre maintenance falls back to zero")
+assertEqual(#loggedWarnings, 2, "missing per-metre price is logged")
+assert(loggedWarnings[2]:find(incompleteTrackName, 1, true), "missing per-metre log names the track")
 
 local loadingResult = runRestrictedUpdate({
     tracks = 2,
@@ -2042,6 +2067,41 @@ local roadReplacementOk = pcall(script.upgradeFn, construction.upgradeScript.par
 })
 assertEqual(roadReplacementOk, false, "non-track replacement rejection")
 
+assertEqual(
+    script.isAffectedByToolFn(
+        construction.isAffectedByToolScript.params,
+        { trackType = 2, catenary = 1 },
+        { streetTemplate = "tram_only.track" },
+        {}
+    ),
+    false,
+    "tram-only replacement is not offered for railway stations"
+)
+local tramReplacementParams = { trackType = 2, catenary = 1 }
+local tramReplacementOk = pcall(
+    script.upgradeFn,
+    construction.upgradeScript.params,
+    tramReplacementParams,
+    -1,
+    { streetTemplate = "tram_only.track" }
+)
+assertEqual(tramReplacementOk, false, "tram-only replacement rejection")
+assertEqual(tramReplacementParams.streetTemplate, nil, "rejected replacement preserves the original track")
+
+do
+    local originalReplacement = templates["custom_catenary.track"].catenaryRemove
+    templates["custom_catenary.track"].catenaryRemove = "tram_only.track"
+    local invalidRailwayPairOk = pcall(
+        script.upgradeFn,
+        construction.upgradeScript.params,
+        { streetTemplate = "custom_catenary.track", catenary = 2 },
+        -1,
+        { catenary = 1 }
+    )
+    templates["custom_catenary.track"].catenaryRemove = originalReplacement
+    assertEqual(invalidRailwayPairOk, false, "tram-only catenary replacement rejection")
+end
+
 local invalidPairOk = pcall(script.upgradeFn, construction.upgradeScript.params, {
     streetTemplate = "broken_catenary_pair.track",
     catenary = 1,
@@ -2060,7 +2120,7 @@ _G.log = {
         loggedMessages[#loggedMessages + 1] = message
     end,
     warning = function(message)
-        error("unexpected warning log: " .. message)
+        loggedWarnings[#loggedWarnings + 1] = message
     end,
     error = function(message)
         error("unexpected error log: " .. message)
@@ -2115,15 +2175,42 @@ for eraSuffix, rates in pairs({
 end
 
 local configuredConstruction = nil
+local configuredTemplate = nil
+local configuredBuilders = {}
+local addedTemplates = {}
+local nativeScriptParams = {}
+gameApi.type["enum"].ScriptParamType = {
+    Button = "native:Button",
+    Slider = "native:Slider",
+    ComboBox = "native:ComboBox",
+    IconButton = "native:IconButton",
+    CheckBox = "native:CheckBox",
+}
+gameApi.type.ScriptParam = {
+    new = function()
+        local param = setmetatable({}, {
+            __newindex = function(target, key, value)
+                if key == "uiType" then
+                    assert(value:match("^native:"), "native ScriptParam requires a native enum value")
+                end
+                rawset(target, key, value)
+            end,
+        })
+        nativeScriptParams[param] = true
+        return param
+    end,
+}
 gameApi.type.ScriptRef = {
     new = function()
         return {}
     end,
 }
-gameApi.res.streetTemplateRep.getAll = function()
+gameApi.res.streetTemplateRep.getAll = function(includeInvisible)
     local resourceNames = {}
-    for resourceName in pairs(templates) do
-        resourceNames[#resourceNames + 1] = resourceName
+    for templateId, resourceName in ipairs(templateResourceNames) do
+        if includeInvisible or not hiddenTemplates[resourceName] then
+            resourceNames[templateId - 1] = resourceName
+        end
     end
     return resourceNames
 end
@@ -2162,6 +2249,65 @@ gameApi.res.constructionRep = {
     end,
 }
 
+local function copyResourceValue(value, seen)
+    if type(value) ~= "table" then
+        return value
+    end
+    seen = seen or {}
+    if seen[value] ~= nil then
+        return seen[value]
+    end
+    local copy = nativeScriptParams[value] and gameApi.type.ScriptParam.new() or {}
+    seen[value] = copy
+    for key, nestedValue in pairs(value) do
+        copy[key] = copyResourceValue(nestedValue, seen)
+    end
+    return copy
+end
+
+gameApi.res.metaConstructionRep = {
+    find = function(resourceName)
+        return resourceName == currentModId .. "::/stations/rail/zigzag/zigzag.metacon" and 0 or -1
+    end,
+    get = function(templateId)
+        assertEqual(templateId, 0, "configured metaconstruction resource")
+        return setmetatable({}, {
+            __index = function(_, key)
+                return configuredTemplate[key]
+            end,
+            __newindex = function(_, key, value)
+                if key == "params" then
+                    for _, param in ipairs(value) do
+                        assert(nativeScriptParams[param], "native parameter assignment requires ScriptParam objects")
+                    end
+                end
+                configuredTemplate[key] = value
+            end,
+            __pairs = function()
+                return pairs(configuredTemplate)
+            end,
+        })
+    end,
+    setVisible = function(templateId, visible)
+        if templateId == 0 then
+            configuredTemplate.visible = visible
+        else
+            addedTemplates[templateId].visible = visible
+        end
+    end,
+    isVisible = function(templateId)
+        assertEqual(templateId, 0, "metaconstruction visibility lookup")
+        return configuredTemplate.visible ~= false
+    end,
+    add = function(resourceName, template, visible)
+        addedTemplates[#addedTemplates + 1] = { name = resourceName, template = copyResourceValue(template), visible = visible }
+        return #addedTemplates
+    end,
+    setAsTable = function()
+        return false
+    end,
+}
+
 local modScript = loadData("content/mod.script.lua")
 assertEqual(
     assert(loadfile("content/zigzag/logging_config.lua"))(),
@@ -2175,16 +2321,29 @@ local function runModScript(
     allModParams,
     infrastructureCostScale,
     infrastructureMaintenanceScale,
-    updateScriptWrapper
+    updateScriptWrapper,
+    templateScriptWrapper
 )
     activeInfrastructureCostScale = infrastructureCostScale or 1
     activeInfrastructureMaintenanceScale = infrastructureMaintenanceScale or 1
     configuredConstruction = loadData("content/stations/rail/zigzag/zigzag.con.lua")
-    for _, template in ipairs(configuredConstruction.constructionTemplates) do
-        template.desc = template.description
-    end
+    configuredTemplate = loadData("content/stations/rail/zigzag/zigzag.metacon.lua")
+    addedTemplates = {}
     if updateScriptWrapper ~= nil then
         updateScriptWrapper(configuredConstruction)
+    end
+    if templateScriptWrapper ~= nil then
+        templateScriptWrapper(configuredTemplate)
+    end
+    for index, param in ipairs(configuredTemplate.params) do
+        local native = gameApi.type.ScriptParam.new()
+        for key, value in pairs(param) do
+            if key == "uiType" then
+                value = gameApi.type["enum"].ScriptParamType[value]
+            end
+            native[key] = value
+        end
+        configuredTemplate.params[index] = native
     end
     loggedMessages = {}
     local baseConfig = nil
@@ -2197,6 +2356,7 @@ local function runModScript(
         }
     end
     modScript.postRunFn({}, {}, allModParams, baseConfig)
+    configuredBuilders[configuredConstruction] = configuredTemplate
     return configuredConstruction
 end
 
@@ -2210,14 +2370,9 @@ assertEqual(
     "default cost-mode log message"
 )
 assertEqual(
-    defaultCostParams.trackCostProfiles["custom.track"].perMetre.construction,
-    250,
-    "live selected-track construction rate"
-)
-assertEqual(
-    defaultCostParams.trackCostProfiles["custom.track"].perMetre.maintenance,
-    40,
-    "live selected-track maintenance rate"
+    defaultCostParams.trackCostProfiles["custom.track"].perMetre,
+    nil,
+    "module mode does not capture unused track rates"
 )
 assertEqual(
     defaultCostParams.trackCostProfiles["custom.track"].perModule.construction,
@@ -2239,19 +2394,9 @@ assertEqual(
     "an incomplete track can still use its valid module cost"
 )
 assertEqual(
-    defaultCostParams.trackCostProfiles["zero_cost.track"].perMetre.construction,
-    0,
-    "explicit zero track construction cost is retained"
-)
-assertEqual(
-    defaultCostParams.trackCostProfiles["zero_cost.track"].perMetre.maintenance,
-    0,
-    "explicit zero track maintenance cost is retained"
-)
-assertEqual(
     defaultCostParams.trackCostProfiles["zero_cost.track"].perModule,
     nil,
-    "track cost does not require a generated module"
+    "missing generated-module cost is left for the logged fallback"
 )
 assertEqual(
     defaultCostParams.trackCostProfiles["malformed_module.track"].perModule,
@@ -2369,8 +2514,8 @@ assertEqual(
     "removed update script produces a compatibility error"
 )
 
-local defaultAttributes = defaultCostConstruction.constructionTemplates[1].desc.attributes
-assertEqual(defaultAttributes.cost[1], 50000 * 5 / 40, "module-mode minimum menu cost")
+local defaultAttributes = configuredBuilders[defaultCostConstruction].description.attributes
+assertEqual(defaultAttributes.cost[1], 0, "module-mode menu includes zero-price fallback")
 assertEqual(
     defaultAttributes.cost[2],
     130000 * 440 / 40 * 8,
@@ -2378,7 +2523,7 @@ assertEqual(
 )
 assertEqual(
     defaultAttributes.maintenanceCost[1],
-    5000 * 5 / 40,
+    0,
     "module-mode minimum menu maintenance"
 )
 assertEqual(
@@ -2426,7 +2571,7 @@ assertEqual(
     nil,
     "no-cost mode does not capture unused track costs"
 )
-local noCostAttributes = noCostConstruction.constructionTemplates[1].desc.attributes
+local noCostAttributes = configuredBuilders[noCostConstruction].description.attributes
 assertEqual(noCostAttributes.cost[1], 0, "no-cost minimum menu cost")
 assertEqual(noCostAttributes.cost[2], 0, "no-cost maximum menu cost")
 assertEqual(noCostAttributes.maintenanceCost[1], 0, "no-cost minimum menu maintenance")
@@ -2447,7 +2592,7 @@ local zeroScaleNoCostConstruction = runModScript({
     },
 }, 0)
 assertEqual(
-    zeroScaleNoCostConstruction.constructionTemplates[1].desc.attributes.cost[2],
+    configuredBuilders[zeroScaleNoCostConstruction].description.attributes.cost[2],
     0,
     "no-cost mode accepts a zero infrastructure scale"
 )
@@ -2459,6 +2604,16 @@ local migratedOnConstruction = runModScript({
 }, 1.5, 2)
 local migratedOnParams = migratedOnConstruction.updateScript.params
 assertEqual(migratedOnParams.costMode, "TRACK_COST", "old On setting migrates to track cost")
+assertEqual(
+    migratedOnParams.trackCostProfiles["zero_cost.track"].perMetre.construction,
+    0,
+    "explicit zero track construction cost is retained"
+)
+assertEqual(
+    migratedOnParams.trackCostProfiles["zero_cost.track"].perMetre.maintenance,
+    0,
+    "explicit zero track maintenance cost is retained"
+)
 assertEqual(
     #migratedOnParams.platformCostProfiles,
     0,
@@ -2474,7 +2629,7 @@ assertEqual(
     40,
     "post-run track maintenance rate removes the applied scale"
 )
-local trackAttributes = migratedOnConstruction.constructionTemplates[1].desc.attributes
+local trackAttributes = configuredBuilders[migratedOnConstruction].description.attributes
 assertEqual(
     trackAttributes.cost[1],
     0,
@@ -2533,7 +2688,7 @@ assertEqual(
     "post-run module price removes the applied construction scale"
 )
 local explicitModuleAttributes =
-    explicitModuleConstruction.constructionTemplates[1].desc.attributes
+    configuredBuilders[explicitModuleConstruction].description.attributes
 assertEqual(
     explicitModuleAttributes.cost[2],
     130000 * 1.5 * 440 / 40 * 8,
@@ -2590,10 +2745,10 @@ assertEqual(
     10000,
     "cargo platform-module maintenance rate"
 )
-local stationAttributes = stationCostConstruction.constructionTemplates[1].desc.attributes
+local stationAttributes = configuredBuilders[stationCostConstruction].description.attributes
 assertEqual(
     stationAttributes.cost[1],
-    50000 * 1.5 * 5 / 40,
+    0,
     "station-mode minimum menu cost"
 )
 assertEqual(
@@ -2654,5 +2809,305 @@ assertEqual(
     true,
     "invalid cost-mode parameter log prefix"
 )
+
+do
+    local templateScript = loadData("content/stations/rail/zigzag/zigzag.template.script.lua")
+    local selection = require("apasz_zigzag::/zigzag/track_selection.lua")
+
+    local function trackIndex(builder, resourceName)
+        for index, track in ipairs(builder.createTemplateScript.params.tracks) do
+            if track.resourceName == resourceName then
+                return index
+            end
+        end
+        return nil
+    end
+
+    local function pickerAt(builder, year)
+        local selected = nil
+        for _, param in ipairs(builder.params) do
+            if param.key == selection.paramKey
+                and param.yearFrom <= year
+                and (param.yearTo == 0 or year < param.yearTo)
+            then
+                assertEqual(selected, nil, "only one track picker is active in each year")
+                selected = param
+            end
+        end
+        return selected
+    end
+
+    local function pickerIncludes(builder, year, resourceName)
+        local picker = pickerAt(builder, year)
+        local index = trackIndex(builder, resourceName)
+        if picker ~= nil then
+            for _, value in ipairs(picker.numbers) do
+                if value == index then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    local function configureMode(modeIndex)
+        return runModScript({
+            [currentModId] = { apasz_zigzag_costs_enabled = modeIndex },
+        })
+    end
+
+    do
+        local builder = configuredBuilders[defaultCostConstruction]
+        assertEqual(trackIndex(builder, "road.street"), nil, "roads are excluded from the railway picker")
+        assertEqual(trackIndex(builder, "tram_only.track"), nil, "tram-only templates are excluded")
+        assertEqual(
+            trackIndex(builder, "::/industries/shared/industry_track/industry.street_template"),
+            nil,
+            "internal templates without a native track-menu entry are excluded"
+        )
+        assert(pickerIncludes(builder, 2020, "standard_catenary.track"), "electrified variants are listed directly")
+        assert(pickerIncludes(builder, 2020, "third_rail.track"), "unpaired third rail is selectable")
+        assert(nativeScriptParams[pickerAt(builder, 2020)], "picker uses a native ScriptParam object")
+        assertEqual(pickerAt(builder, 2020).uiType, gameApi.type["enum"].ScriptParamType.ComboBox, "picker uses a native enum value")
+        for _, param in ipairs(builder.params) do
+            assert(param.key ~= "trackType" and param.key ~= "catenary", "new builds have no legacy track controls")
+        end
+
+        local input = {
+            apasz_zigzag_track_variant = assert(trackIndex(builder, "third_rail.track")),
+            year = 2020,
+            lengthMetres = 40,
+            tracks = 2,
+            passengerLoadingEnabled = 2,
+            compatibility_test = { marker = true },
+        }
+        local proposal = runRestrictedCallback(
+            templateScript.createTemplateFn,
+            builder.createTemplateScript.params,
+            input
+        )
+        local station = proposal.constructions[1]
+        assertEqual(#proposal.constructions, 1, "template places one station")
+        assertEqual(station.constructionFileName, currentModId .. "::/stations/rail/zigzag/zigzag.con", "saved construction path is unchanged")
+        assertEqual(next(station.modules), nil, "platform-free station has no placed modules")
+        assertEqual(station.params.streetTemplate, "third_rail.track", "template saves the exact resource path")
+        assertEqual(station.params.catenary, 2, "third-rail electric capability is persisted")
+        assertEqual(station.params.apasz_zigzag_track_variant, nil, "transient picker index is not saved")
+        assertEqual(station.params.trackType, nil, "new stations do not save a legacy track index")
+        assertEqual(station.params.compatibility_test, input.compatibility_test, "other parameter fields are preserved")
+        assert(input.apasz_zigzag_track_variant ~= nil, "template does not mutate the preview parameters")
+        local result = runRestrictedUpdateWithCapture(defaultCostParams, station.params)
+        assertEqual(result.edgeLists[1].params.type, "third_rail.track", "selected track reaches station geometry")
+        assertEqual(result.subconstructions[1].station.terminals[1].transportModes[2], "ELECTRIC_TRAIN", "third-rail terminals allow electric trains")
+
+        templates["third_rail.track"].menuCategory.categories[1].order = -10
+        local reordered = configureMode(3)
+        assertEqual(trackIndex(configuredBuilders[reordered], "third_rail.track"), 1, "native menu order is respected")
+        hiddenTemplates["third_rail.track"] = true
+        local hidden = configureMode(3)
+        assertEqual(trackIndex(configuredBuilders[hidden], "third_rail.track"), nil, "hidden third rail is not offered for new builds")
+        local savedResult = runRestrictedUpdateWithCapture(hidden.updateScript.params, station.params)
+        assertEqual(savedResult.edgeLists[1].params.type, "third_rail.track", "saved identity survives catalogue reordering and hiding")
+        assertEqual(savedResult.cost, result.cost, "hidden saved tracks retain their real module cost")
+        templates["third_rail.track"].menuCategory.categories[1].order = 0
+        hiddenTemplates["third_rail.track"] = nil
+    end
+
+    do
+        local warningsBefore = #loggedWarnings
+        hiddenTemplates["standard_catenary.track"] = true
+        for modeIndex, expectedCost in ipairs({ 0, 7200, 90000, 90000 }) do
+            local configured = configureMode(modeIndex)
+            local builder = configuredBuilders[configured]
+            assertEqual(trackIndex(builder, "standard_catenary.track"), nil, "hidden vanilla track is excluded from the picker")
+            local result = runRestrictedUpdateWithCapture(
+                configured.updateScript.params,
+                { trackType = 2, catenary = 2, lengthMetres = 40 }
+            )
+            assertEqual(result.edgeLists[1].params.type, "standard_catenary.track", "legacy track index remains unchanged")
+            assertEqual(result.cost, expectedCost, "hidden legacy track has the correct cost in each mode")
+            if modeIndex > 1 then
+                local upgraded = script.upgradeFn(
+                    construction.upgradeScript.params,
+                    { trackType = 2, catenary = 1, lengthMetres = 40 },
+                    -1,
+                    { catenary = 2 }
+                )
+                local upgradedResult = runRestrictedUpdateWithCapture(configured.updateScript.params, upgraded)
+                assertEqual(upgraded.streetTemplate, "standard_catenary.track", "hidden catenary counterpart remains usable")
+                assertEqual(upgradedResult.cost, expectedCost, "hidden counterpart retains its captured costs")
+            end
+        end
+        assertEqual(#loggedWarnings, warningsBefore, "hidden tracks with costs do not trigger fallback warnings")
+        hiddenTemplates["standard_catenary.track"] = nil
+    end
+
+    do
+        templates["custom.track"].availability = { yearFrom = 1850, yearTo = 1900 }
+        local configured = configureMode(3)
+        local builder = configuredBuilders[configured]
+        assertEqual(pickerIncludes(builder, 1849, "custom.track"), false, "future tracks are excluded")
+        assertEqual(pickerIncludes(builder, 1850, "custom.track"), true, "track availability starts inclusively")
+        assertEqual(pickerIncludes(builder, 1899, "custom.track"), true, "track remains available before retirement")
+        assertEqual(pickerIncludes(builder, 1900, "custom.track"), false, "track retirement is exclusive")
+        local index = assert(trackIndex(builder, "custom.track"))
+        local available = runRestrictedCallback(
+            templateScript.createTemplateFn,
+            builder.createTemplateScript.params,
+            { apasz_zigzag_track_variant = index, year = 1850 }
+        )
+        assertEqual(available.constructions[1].params.catenary, 1, "non-electric track capability is persisted")
+        local unavailableOk = pcall(
+            templateScript.createTemplateFn,
+            builder.createTemplateScript.params,
+            { apasz_zigzag_track_variant = index, year = 1900 }
+        )
+        assertEqual(unavailableOk, false, "template rejects an unavailable new selection")
+        local invalidOk = pcall(
+            templateScript.createTemplateFn,
+            builder.createTemplateScript.params,
+            { apasz_zigzag_track_variant = 9999, year = 1850 }
+        )
+        assertEqual(invalidOk, false, "template rejects an invalid variant index")
+        local existing = runRestrictedUpdateWithCapture(
+            configured.updateScript.params,
+            { streetTemplate = "custom.track", catenary = 1, year = 1900 }
+        )
+        assertEqual(existing.edgeLists[1].params.type, "custom.track", "retirement does not replace saved tracks")
+        templates["custom.track"].availability = { yearFrom = 0, yearTo = 0 }
+    end
+
+    do
+        local warningsBefore = #loggedWarnings
+        local result = runRestrictedUpdateWithCapture(
+            stationCostConstruction.updateScript.params,
+            {
+                streetTemplate = "zero_cost.track",
+                catenary = 1,
+                lengthMetres = 40,
+                tracks = 2,
+                passengerLoadingEnabled = 2,
+                cargoLoadingEnabled = 2,
+                year = 1950,
+            }
+        )
+        assertEqual(result.cost, 2 * (90000 + 45000), "missing track-module price preserves platform construction costs")
+        assertEqual(result.maintenanceCost, 2 * (15000 + 7500), "missing track-module price preserves platform maintenance")
+        assertEqual(#loggedWarnings, warningsBefore + 1, "zero fallback is logged once for the selected track")
+        local zeroResult = runRestrictedUpdateWithCapture(
+            zeroModuleConstruction.updateScript.params,
+            { streetTemplate = "zero_cost.track", catenary = 1 }
+        )
+        assertEqual(zeroResult.cost, 0, "explicit zero module price remains valid")
+        assertEqual(#loggedWarnings, warningsBefore + 1, "explicit zero prices produce no warning")
+    end
+
+    do
+        local originalHidden = hiddenTemplates
+        hiddenTemplates = {}
+        for resourceName in pairs(templates) do
+            hiddenTemplates[resourceName] = true
+        end
+        local configured = configureMode(3)
+        assertEqual(configuredBuilders[configured].visible, false, "builder is hidden when no tracks are offered")
+        local existing = runRestrictedUpdateWithCapture(configured.updateScript.params, {})
+        assertEqual(existing.cost, 20000, "existing stations work when every track is hidden")
+        hiddenTemplates = originalHidden
+    end
+
+    do
+        local capture = captureWithCostMode("MODULE_COST")
+        capture.trackCostProfiles = {}
+        local warningsBefore = #loggedWarnings
+        local result = runRestrictedUpdateWithCapture(
+            capture,
+            { streetTemplate = "other_mod::/modded.track", catenary = 1 }
+        )
+        assertEqual(result.cost, 0, "a missing entire cost profile falls back to zero")
+        assertEqual(result.maintenanceCost, 0, "a missing profile has zero track maintenance")
+        assertEqual(#loggedWarnings, warningsBefore + 1, "missing profile is logged with its track")
+        assert(loggedWarnings[#loggedWarnings]:find("other_mod::/modded.track", 1, true), "missing-profile warning identifies the resource")
+    end
+
+    do
+        local originalHidden = hiddenTemplates
+        hiddenTemplates = {}
+        for resourceName in pairs(templates) do
+            hiddenTemplates[resourceName] = resourceName ~= "custom.track" and resourceName ~= "third_rail.track"
+        end
+        templates["custom.track"].availability = { yearFrom = 1850, yearTo = 1900 }
+        templates["third_rail.track"].availability = { yearFrom = 1950, yearTo = 0 }
+        local configured = configureMode(3)
+        local builder = configuredBuilders[configured]
+        assertEqual(builder.availability.yearFrom, 1850, "build entry starts with the first available track")
+        assertEqual(builder.availability.yearTo, 1900, "build entry ends when no tracks remain")
+        assertEqual(#addedTemplates, 1, "a later availability period gets its own build entry")
+        assertEqual(addedTemplates[1].template.availability.yearFrom, 1950, "later build entry starts after the gap")
+        assertEqual(addedTemplates[1].template.availability.yearTo, 0, "later build entry remains available")
+        assertEqual(addedTemplates[1].template.description.attributes.cost[2], builder.description.attributes.cost[2], "period entries retain the configured cost attributes")
+        assertEqual(addedTemplates[1].visible, true, "later build entry inherits visibility")
+        assertEqual(pickerAt(builder, 1920), nil, "availability gaps have no track selector")
+        templates["custom.track"].availability = { yearFrom = 0, yearTo = 0 }
+        templates["third_rail.track"].availability = { yearFrom = 0, yearTo = 0 }
+        hiddenTemplates = originalHidden
+    end
+
+    do
+        local originalFind = gameApi.res.moduleRep.find
+        gameApi.res.moduleRep.find = function()
+            error("unexpected generated-module lookup")
+        end
+        local ok, configured = pcall(configureMode, 2)
+        gameApi.res.moduleRep.find = originalFind
+        assert(ok, "track-cost mode must not read module costs: " .. tostring(configured))
+        assertEqual(configured.updateScript.params.trackCostProfiles["custom.track"].perModule, nil, "track mode does not capture unused module prices")
+
+        local originalGet = gameApi.res.streetTemplateRep.get
+        gameApi.res.streetTemplateRep.get = function(id)
+            local template = originalGet(id)
+            return setmetatable({}, {
+                __index = function(_, key)
+                    assert(key ~= "cost" and key ~= "maintenanceCost", "unexpected per-metre cost read")
+                    return template[key]
+                end,
+            })
+        end
+        local moduleOk, moduleConfigured = pcall(configureMode, 3)
+        gameApi.res.streetTemplateRep.get = originalGet
+        assert(moduleOk, "module-cost mode must not read per-metre prices: " .. tostring(moduleConfigured))
+        assertEqual(moduleConfigured.updateScript.params.trackCostProfiles["custom.track"].perMetre, nil, "module mode does not capture unused per-metre prices")
+    end
+
+    do
+        local wrapped = runModScript(nil, nil, nil, nil, function(builder)
+            local original = builder.createTemplateScript
+            builder.createTemplateScript = {
+                fileName = "compatibility_test::/template.script@create",
+                params = { callback = original.fileName, arguments = original.params },
+            }
+            builder.params[#builder.params + 1] = { key = "other_mod_param", values = { "Preserved" } }
+        end)
+        local builder = configuredBuilders[wrapped]
+        assertEqual(builder.createTemplateScript.fileName, "compatibility_test::/template.script@create", "template wrapper is preserved")
+        assertEqual(builder.createTemplateScript.params.callback, "zigzag.template.script@createTemplateFn", "wrapped callback is preserved")
+        assert(#builder.createTemplateScript.params.arguments.tracks > 0, "wrapped template captures receive track choices")
+        assertEqual(builder.params[#builder.params].key, "other_mod_param", "other mods' builder controls are preserved")
+    end
+
+    do
+        local originalCost = templates["custom.track"].cost
+        templates["custom.track"].cost = -1
+        local configured = configureMode(2)
+        local warningsBefore = #loggedWarnings
+        local result = runRestrictedUpdateWithCapture(
+            configured.updateScript.params,
+            { streetTemplate = "custom.track", catenary = 1 }
+        )
+        assertEqual(result.cost, 0, "unusable track cost uses the logged zero-price fallback")
+        assertEqual(#loggedWarnings, warningsBefore + 1, "unusable selected cost is logged")
+        templates["custom.track"].cost = originalCost
+    end
+
+end
 
 print("zigzag_check: ok")
