@@ -40,7 +40,7 @@ local dependencies = {
     ["::/gui/main/builtin.lua"] = builtin,
     ["/gui/main/builtin.lua"] = builtin,
     ["::/gui/main/react.lua"] = react,
-    ["/scripts/table_util.tl"] = { shallowCopy = copy },
+    ["/scripts/table_util.tl"] = { shallowCopy = copy, copy = copy },
     ["::/scripts/table_util.tl"] = { shallowCopy = copy },
     ["/gui/main/engine_react_util.tl"] = {},
     ["/gui/main/callout_react_util.tl"] = {},
@@ -51,6 +51,64 @@ local dependencies = {
 }
 _G.ug_require = function(name) return assert(dependencies[name], name) end
 _G.api = { type = { ["enum"] = { ScriptParamType = { ComboBox = 3, Button = 1, Slider = 2, IconButton = 4, CheckBox = 5 } } } }
+
+do
+    assert(loadfile(assert(arg[3], "run through tests/track_icons_check.py")))()
+    local stylesheetEnv = setmetatable({ require = ug_require }, { __index = _G })
+    dependencies["::/gui/main/stylesheetutil.lua"] = assert(loadfile(
+        assert(arg[2], "run through tests/track_icons_check.py"), "t", stylesheetEnv
+    ))()
+    local sizesPath = "::/gui/construction/construction_sizes.lua"
+    local previousResolver = rawget(_G, "resolveutil")
+    local loadError = "Could not find file " .. sizesPath
+    _G.resolveutil = { loadfile = function(path)
+        assert(path == sizesPath, "only the optional sizes module is probed")
+        if loadError then return nil, loadError end
+        return function() error("the probe must not execute the module outside ug_require") end
+    end }
+    local function loadStyles()
+        local byClass = {}
+        for _, rule in ipairs(loadData("content/gui/zigzag/track_icons.css.lua")) do
+            assert(#rule.levels == 1 and #rule.levels[1].classList == 1, "track styles stay namespaced")
+            byClass[rule.levels[1].classList[1]] = rule.styleSheet
+        end
+        return byClass
+    end
+
+    -- Missing modules must never reach ug_require on build 40425.
+    local fallback = loadStyles()
+    local name = assert(fallback["apasz-zigzag-track-name"])
+    local icon = assert(fallback["apasz-zigzag-track-icon"])
+    local row = assert(fallback["apasz-zigzag-track-row"])
+    assert(name.textAutoWrap and name.maxSize[1] > 0, "long track names wrap at a positive width")
+    local rowOverhead = icon.size[1] + row.innerSpacing[1] + 64
+    assert(name.maxSize[1] + rowOverhead == 400, "missing sizes module uses the build 40425 panel width")
+
+    loadError = nil
+    for _, width in ipairs({ 520, 640.5 }) do
+        dependencies[sizesPath] = { ParamsWindowWidth = width }
+        local nativeName = loadStyles()["apasz-zigzag-track-name"]
+        assert(nativeName.maxSize[1] == math.floor(width - rowOverhead),
+            "native panel widths override the fallback and produce integer text widths")
+    end
+
+    for _, sizes in ipairs({ {}, { ParamsWindowWidth = "520" }, { ParamsWindowWidth = 0 },
+        { ParamsWindowWidth = -1 }, { ParamsWindowWidth = math.huge }, { ParamsWindowWidth = 0 / 0 } }) do
+        dependencies[sizesPath] = sizes
+        local ok, message = pcall(loadStyles)
+        assert(not ok and tostring(message):find("finite positive ParamsWindowWidth", 1, true),
+            "invalid native widths fail instead of silently using the fallback")
+    end
+
+    loadError = "syntax error in " .. sizesPath
+    local ok, message = pcall(loadStyles)
+    assert(not ok and tostring(message):find(loadError, 1, true), "module errors must not use the missing-file fallback")
+    loadError = nil
+    dependencies[sizesPath] = nil
+    ok, message = pcall(loadStyles)
+    assert(not ok and tostring(message):find(sizesPath, 1, true), "module execution errors must not use the fallback")
+    _G.resolveutil = previousResolver
+end
 
 local nativeRendererPath = assert(arg[1], "run through tests/track_icons_check.py")
 local util = assert(loadfile(nativeRendererPath))()

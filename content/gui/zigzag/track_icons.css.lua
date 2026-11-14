@@ -23,14 +23,47 @@ local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 th
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 local stylesheetUtil = ug_require("::/gui/main/stylesheetutil.lua")
-local constructionSizes = ug_require("::/gui/construction/construction_sizes.lua")
+local CONSTRUCTION_SIZES_PATH = "::/gui/construction/construction_sizes.lua"
+
+local FALLBACK_PARAMS_WINDOW_WIDTH = 400
 local ICON_SIZE = { 48, 30 }
 local ROW_GAP = 8
 
 local DROPDOWN_CHROME_WIDTH = 64
+
+local function paramsWindowWidth()
+
+   local chunk, loadError = resolveutil.loadfile(CONSTRUCTION_SIZES_PATH)
+   if chunk == nil then
+      if loadError == "Could not find file " .. CONSTRUCTION_SIZES_PATH then
+         return FALLBACK_PARAMS_WINDOW_WIDTH
+      end
+      error(loadError or "Unable to load " .. CONSTRUCTION_SIZES_PATH)
+   end
+
+   local sizes = ug_require(CONSTRUCTION_SIZES_PATH)
+   local width = sizes.ParamsWindowWidth
+   if type(width) ~= "number" or not (width > 0 and width < math.huge) then
+      error("Zigzag Station requires a finite positive ParamsWindowWidth")
+   end
+   return width
+end
+
 local TRACK_NAME_MAX_WIDTH = math.floor(
-constructionSizes.ParamsWindowWidth - ICON_SIZE[1] - ROW_GAP - DROPDOWN_CHROME_WIDTH)
+paramsWindowWidth() - ICON_SIZE[1] - ROW_GAP - DROPDOWN_CHROME_WIDTH)
 
 
 function data()

@@ -85,12 +85,14 @@ function identity. The extension retains the native dropdown and compact callout
 unrelated selectors to the previous renderer. Icon metadata is read during menu construction;
 rendering uses cached rows. Availability periods are indexed once for metadata lookup, and
 expired selections update the native stored value after rendering. Namespaced styles set the
-thumbnail size, spacing and name wrapping.
+thumbnail size, spacing and name wrapping using the native `construction_sizes.lua` panel
+width, falling back to 400 pixels on older builds such as 40425 where that module is absent.
 
 The GUI checks compile the current renderer from the game's `base/content/gui.zip`, then test
 the extension against it. Use `--tl /path/to/tl` if the Teal compiler is not on PATH. Coverage
 includes year-filtered IDs, expired selections, reordered entries, empty icons, compact callouts,
-layout spacing, existing GUI wrappers, and avoiding resource lookups during rendering. In-game checks should
+native and fallback stylesheet widths, layout spacing, existing GUI
+wrappers, and avoiding resource lookups during rendering. In-game checks should
 include dropdown clipping and controller input at different UI scales.
 
 The track tests cover hidden vanilla and modded templates, third rail, availability boundaries,
