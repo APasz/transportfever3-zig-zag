@@ -14,6 +14,13 @@ A platform-free railway station for reversing trains and building switchback or 
 - Adjustable lengths of 5, 10, and 20 metres, then 40-metre steps through 440 metres;
   10 metres is the default.
 - Adjustable track spacing from 3 to 20 metres, in one-metre steps, with 5 metres as the default.
+- Two always-visible curve-radius sliders, Start and End, each ranging from -2,000 to +2,000
+  metres and controlling half the station. Negative values curve left, positive values curve
+  right, and zero keeps that half straight. Both default to zero. Matching values form a continuous
+  curve; opposite signs form an S-curve. Different radii and curves at only one end are supported.
+- Parallel tracks stay concentric within each half, with matching loading lanes, passenger crossings
+  and catchment points. Length and radii refer to the station's centre line. Passenger capacity
+  and loading length follow each track's combined arc length.
 - Four construction and maintenance cost models: no cost, selected-track cost, equivalent
   vanilla track-module cost, or track-module cost plus matching passenger/cargo platforms.
   New games default to module cost; old Off/On configurations migrate to No Cost/Track Cost.
@@ -49,6 +56,7 @@ tl gen -c -o content/mod.script.lua src/mod.script.tl
 tl gen -c -o content/zigzag/logging_config.lua src/zigzag/logging_config.tl
 tl gen -c -o content/zigzag/construction_path.lua src/zigzag/construction_path.tl
 tl gen -c -o content/zigzag/track_selection.lua src/zigzag/track_selection.tl
+tl gen -c -o content/zigzag/validation_metadata.lua src/zigzag/validation_metadata.tl
 tl gen -c -o content/zigzag/station_definition.lua src/zigzag/station_definition.tl
 tl gen -c -o content/gui/zigzag/track_icons.script.lua src/gui/zigzag/track_icons.script.tl
 tl gen -c -o content/gui/zigzag/track_icons.res.lua src/gui/zigzag/track_icons.res.tl
@@ -64,6 +72,18 @@ tl gen -c -o content/stations/rail/zigzag/zigzag.script.lua src/stations/rail/zi
 lua tests/zigzag_check.lua
 python3 tests/track_icons_check.py "/path/to/Transport Fever 3"
 ```
+
+The two halves meet at a fixed station midpoint with a shared tangent. Both ends remain
+connectable. Radius selections are never widened automatically: invalid combinations are
+rejected with a message giving the minimum radius and affected end. The limit includes the
+selected track's minimum build radius and station width, and limits each half's turn to 90
+degrees. Existing stations without curve parameters keep their straight layout, stop nodes
+and prices.
+
+Radius validation uses namespaced construction metadata and the native builder's
+`proposalCreate` and `proposalPrepareForApply` events, including track upgrades. Invalid
+choices remain visible in the preview and are blocked with build errors. Reload the save
+after updating so the game script installs these event subscriptions.
 
 User-facing text is defined in `strings.json`. Its translation keys are namespaced
 with `apasz_zigzag_` to avoid collisions with other mods.
@@ -91,6 +111,7 @@ width, falling back to 400 pixels on older builds such as 40425 where that modul
 The GUI checks compile the current renderer from the game's `base/content/gui.zip`, then test
 the extension against it. Use `--tl /path/to/tl` if the Teal compiler is not on PATH. Coverage
 includes year-filtered IDs, expired selections, reordered entries, empty icons, compact callouts,
+both signed curve sliders (including zero and negative values),
 native and fallback stylesheet widths, layout spacing, existing GUI
 wrappers, and avoiding resource lookups during rendering. In-game checks should
 include dropdown clipping and controller input at different UI scales.
@@ -100,6 +121,16 @@ saved identity after catalogue reordering, wrapped scripts, zero-price fallbacks
 rejected tram-only upgrades, and avoiding unused pricing reads.
 In-game verification should include NEP³ before Zigzag, a save with existing Zigzag stations,
 new placements with several track variants, and catenary and track upgrades after reloading.
+
+Curve tests cover every pair of end radii, short and long stations, multiple track counts,
+every loading combination, physical track spacing, tangent continuity, sampled arc accuracy,
+terminal references, passenger access connections, shared midpoint tangents, one-ended curves,
+S-curves, asymmetric capacities, radius limits, saved parameters and upgrades. Build-validation
+checks cover both ends, stricter upgrade radii, unrelated proposals and saved event subscriptions.
+An optional first argument to `tests/zigzag_check.lua` loads a compiled copy of the game's
+`scripts/construction/street_util_serialized.tl` to check against the native tangent helper.
+In-game checks should also cover connected approaches at both ends, reversing trains, catenary
+appearance on tight curves, invalid-radius messages and save/reload.
 
 Selecting a frozen Zigzag track forwards the native selection event to its owning construction.
 The construction's window hook then supplies vanilla station-group content and renames the

@@ -12,7 +12,7 @@ local function loadData(path)
 end
 
 local builtin = { type = { Orientation = { Horizontal = "horizontal", Vertical = "vertical" }, ImageViewScaling = { AutoFit = "fit" } } }
-for _, kind in ipairs({ "Component", "BoxLayout", "TextView", "ImageView", "ComboBoxItem", "ComboBox" }) do
+for _, kind in ipairs({ "Component", "BoxLayout", "TextView", "ImageView", "ComboBoxItem", "ComboBox", "Slider" }) do
     builtin[kind] = function(params) return { kind = kind, params = params } end
 end
 local componentKinds = { Component = true, TextView = true, ImageView = true, ComboBox = true }
@@ -22,8 +22,21 @@ builtin.ComboBoxItem = function(params)
     return comboBoxItem(params)
 end
 local stepCallbacks = {}
+local mouseCallbacks = {}
+local function mutableValue(value)
+    return {
+        old = function() return value end,
+        get = function() return value end,
+        set = function(_, nextValue) value = nextValue end,
+    }
+end
 local react = {
     onStep = function(callback) stepCallbacks[#stepCallbacks + 1] = callback end,
+    onMouseEvent = function(callback) mouseCallbacks[#mouseCallbacks + 1] = callback end,
+    useState = mutableValue,
+    useRef = mutableValue,
+    useNodeRef = function() return mutableValue(nil) end,
+    ref = function(reference) return reference end,
     RegisterRecipe = function(name, body)
         local function render(...)
             local child = body(...)
@@ -282,6 +295,40 @@ do
     end
     local later = buildSelector(uiParams(decorated[1]))
     assert(laterCalls == 1 and later.params.items[1].params.content.kind == "Component", "later GUI wrappers can delegate to the icon renderer")
+end
+
+do
+    _G._ = function(value) return value end
+    dependencies["::/scripts/construction/param_util.tl"] = {}
+    local stationDefinition = assert(loadfile("content/zigzag/station_definition.lua"))()
+    local template = stationDefinition.makeTemplate()
+    local sliders = 0
+    for _, param in ipairs(template.params) do
+        if param.key == "signedStartCurveRadiusMetres" or param.key == "signedEndCurveRadiusMetres" then
+            sliders = sliders + 1
+            local nativeParam = copy(param)
+            nativeParam.uiType = api.type["enum"].ScriptParamType.Slider
+            for index, radius in ipairs(param.numbers) do
+                local selected
+                local recipe = buildSelector(uiParams(nativeParam, {
+                    currentValue = radius,
+                    onValueChange = function(value) selected = value end,
+                }))
+                assert(recipe.kind == "ScriptParamSliderAndText", "curve controls use the native slider")
+                local layout = recipe.body(recipe.params)
+                local slider, text = table.unpack(layout.params.children)
+                assert(slider.params.value == index and slider.params.min == 1 and slider.params.max == #param.numbers,
+                    "signed radii select the correct native slider position")
+                assert(text.extra[1].initialValue == radius, "the native label receives the signed radius")
+                assert(text.extra[1].formatValueFn(radius) == param.values[index], "the native label uses the radius text")
+                for targetIndex, targetRadius in ipairs(param.numbers) do
+                    slider.params.onValueChange(targetIndex)
+                    assert(selected == targetRadius, "slider callbacks preserve negative, zero and positive radii")
+                end
+            end
+        end
+    end
+    assert(sliders == 2, "both independent end controls reach the native renderer")
 end
 
 do

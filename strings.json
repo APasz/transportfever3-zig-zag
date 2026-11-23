@@ -17,7 +17,12 @@
         "apasz_zigzag_cost_mode_module": "Module Cost",
         "apasz_zigzag_cost_mode_station": "Station Cost",
         "apasz_zigzag_off": "Off",
-        "apasz_zigzag_on": "On"
+        "apasz_zigzag_on": "On",
+        "apasz_zigzag_straight": "Straight",
+        "apasz_zigzag_curve_radius_tooltip": "Negative: left. Zero: straight. Positive: right. Each control bends one half of the station. Matching values form a continuous curve; opposite signs form an S-curve.",
+        "apasz_zigzag_curve_radius_too_small": "Curve radius %d m is too small. Use at least %d m for this track, station width and length.",
+        "apasz_zigzag_start_curve_radius": "Start curve radius",
+        "apasz_zigzag_end_curve_radius": "End curve radius"
     },
     "de": {
         "apasz_zigzag_name": "Spitzkehrenbahnhof",
@@ -37,7 +42,12 @@
         "apasz_zigzag_cost_mode_module": "Modulkosten",
         "apasz_zigzag_cost_mode_station": "Bahnhofskosten",
         "apasz_zigzag_off": "Aus",
-        "apasz_zigzag_on": "Ein"
+        "apasz_zigzag_on": "Ein",
+        "apasz_zigzag_straight": "Gerade",
+        "apasz_zigzag_curve_radius_tooltip": "Negativ: links. Null: gerade. Positiv: rechts. Jeder Regler krümmt eine Bahnhofshälfte. Gleiche Werte bilden einen durchgehenden Bogen, unterschiedliche Vorzeichen eine S-Kurve.",
+        "apasz_zigzag_curve_radius_too_small": "Kurvenradius %d m ist zu klein. Für dieses Gleis sowie diese Bahnhofsbreite und -länge sind mindestens %d m erforderlich.",
+        "apasz_zigzag_start_curve_radius": "Kurvenradius am Anfang",
+        "apasz_zigzag_end_curve_radius": "Kurvenradius am Ende"
     },
     "es": {
         "apasz_zigzag_name": "Estación en zigzag",
@@ -57,7 +67,12 @@
         "apasz_zigzag_cost_mode_module": "Coste de módulo",
         "apasz_zigzag_cost_mode_station": "Coste de estación",
         "apasz_zigzag_off": "Desactivado",
-        "apasz_zigzag_on": "Activado"
+        "apasz_zigzag_on": "Activado",
+        "apasz_zigzag_straight": "Recta",
+        "apasz_zigzag_curve_radius_tooltip": "Negativo: izquierda. Cero: recta. Positivo: derecha. Cada control curva una mitad de la estación. Valores iguales forman una curva continua; signos opuestos forman una curva en S.",
+        "apasz_zigzag_curve_radius_too_small": "El radio de curva de %d m es demasiado pequeño. Usa al menos %d m para esta vía y estas dimensiones de estación.",
+        "apasz_zigzag_start_curve_radius": "Radio de curva inicial",
+        "apasz_zigzag_end_curve_radius": "Radio de curva final"
     },
     "fr": {
         "apasz_zigzag_name": "Gare en zigzag",
@@ -77,7 +92,12 @@
         "apasz_zigzag_cost_mode_module": "Coût des modules",
         "apasz_zigzag_cost_mode_station": "Coût de la gare",
         "apasz_zigzag_off": "Désactivé",
-        "apasz_zigzag_on": "Activé"
+        "apasz_zigzag_on": "Activé",
+        "apasz_zigzag_straight": "Rectiligne",
+        "apasz_zigzag_curve_radius_tooltip": "Négatif : gauche. Zéro : ligne droite. Positif : droite. Chaque réglage courbe une moitié de la gare. Des valeurs identiques forment une courbe continue ; des signes opposés forment une courbe en S.",
+        "apasz_zigzag_curve_radius_too_small": "Le rayon de %d m est trop petit. Utilisez au moins %d m pour cette voie et ces dimensions de gare.",
+        "apasz_zigzag_start_curve_radius": "Rayon de courbure au début",
+        "apasz_zigzag_end_curve_radius": "Rayon de courbure à la fin"
     },
     "it": {
         "apasz_zigzag_name": "Stazione a zig-zag",
@@ -97,7 +117,12 @@
         "apasz_zigzag_cost_mode_module": "Costo moduli",
         "apasz_zigzag_cost_mode_station": "Costo stazione",
         "apasz_zigzag_off": "Disattivato",
-        "apasz_zigzag_on": "Attivato"
+        "apasz_zigzag_on": "Attivato",
+        "apasz_zigzag_straight": "Rettilineo",
+        "apasz_zigzag_curve_radius_tooltip": "Negativo: sinistra. Zero: rettilineo. Positivo: destra. Ogni controllo curva una metà della stazione. Valori uguali formano una curva continua; segni opposti formano una curva a S.",
+        "apasz_zigzag_curve_radius_too_small": "Il raggio di %d m è troppo piccolo. Usa almeno %d m per questo binario e queste dimensioni della stazione.",
+        "apasz_zigzag_start_curve_radius": "Raggio della curva iniziale",
+        "apasz_zigzag_end_curve_radius": "Raggio della curva finale"
     },
     "ja": {
         "apasz_zigzag_name": "スイッチバック駅",
@@ -117,7 +142,12 @@
         "apasz_zigzag_cost_mode_module": "モジュール費用",
         "apasz_zigzag_cost_mode_station": "駅費用",
         "apasz_zigzag_off": "オフ",
-        "apasz_zigzag_on": "オン"
+        "apasz_zigzag_on": "オン",
+        "apasz_zigzag_straight": "直線",
+        "apasz_zigzag_curve_radius_tooltip": "負の値：左カーブ。ゼロ：直線。正の値：右カーブ。各設定は駅の片側半分に適用されます。同じ値で連続したカーブ、異なる符号でS字カーブになります。",
+        "apasz_zigzag_curve_radius_too_small": "曲線半径 %d m は小さすぎます。この線路と駅の幅・長さには、少なくとも %d m が必要です。",
+        "apasz_zigzag_start_curve_radius": "始点側の曲線半径",
+        "apasz_zigzag_end_curve_radius": "終点側の曲線半径"
     },
     "ko": {
         "apasz_zigzag_name": "스위치백역",
@@ -137,7 +167,12 @@
         "apasz_zigzag_cost_mode_module": "모듈 비용",
         "apasz_zigzag_cost_mode_station": "역 비용",
         "apasz_zigzag_off": "끄기",
-        "apasz_zigzag_on": "켜기"
+        "apasz_zigzag_on": "켜기",
+        "apasz_zigzag_straight": "직선",
+        "apasz_zigzag_curve_radius_tooltip": "음수: 왼쪽 곡선. 0: 직선. 양수: 오른쪽 곡선. 각 설정은 역의 한쪽 절반에 적용됩니다. 같은 값은 연속 곡선, 반대 부호는 S자 곡선을 만듭니다.",
+        "apasz_zigzag_curve_radius_too_small": "곡선 반경 %d m는 너무 작습니다. 이 선로와 역의 폭 및 길이에는 최소 %d m가 필요합니다.",
+        "apasz_zigzag_start_curve_radius": "시작부 곡선 반경",
+        "apasz_zigzag_end_curve_radius": "끝부분 곡선 반경"
     },
     "nl": {
         "apasz_zigzag_name": "Zigzagstation",
@@ -157,7 +192,12 @@
         "apasz_zigzag_cost_mode_module": "Modulekosten",
         "apasz_zigzag_cost_mode_station": "Stationskosten",
         "apasz_zigzag_off": "Uit",
-        "apasz_zigzag_on": "Aan"
+        "apasz_zigzag_on": "Aan",
+        "apasz_zigzag_straight": "Recht",
+        "apasz_zigzag_curve_radius_tooltip": "Negatief: links. Nul: recht. Positief: rechts. Elke regelaar buigt één helft van het station. Gelijke waarden vormen een doorlopende boog; tegengestelde tekens vormen een S-bocht.",
+        "apasz_zigzag_curve_radius_too_small": "Boogstraal %d m is te klein. Gebruik minstens %d m voor dit spoor en deze stationsbreedte en -lengte.",
+        "apasz_zigzag_start_curve_radius": "Boogstraal aan het begin",
+        "apasz_zigzag_end_curve_radius": "Boogstraal aan het einde"
     },
     "pl": {
         "apasz_zigzag_name": "Stacja zygzakowa",
@@ -177,7 +217,12 @@
         "apasz_zigzag_cost_mode_module": "Koszt modułów",
         "apasz_zigzag_cost_mode_station": "Koszt stacji",
         "apasz_zigzag_off": "Wyłączone",
-        "apasz_zigzag_on": "Włączone"
+        "apasz_zigzag_on": "Włączone",
+        "apasz_zigzag_straight": "Prosto",
+        "apasz_zigzag_curve_radius_tooltip": "Wartość ujemna: w lewo. Zero: prosto. Wartość dodatnia: w prawo. Każdy suwak wygina jedną połowę stacji. Równe wartości tworzą ciągły łuk, przeciwne znaki tworzą łuk w kształcie S.",
+        "apasz_zigzag_curve_radius_too_small": "Promień łuku %d m jest za mały. Dla tego toru oraz tej szerokości i długości stacji potrzeba co najmniej %d m.",
+        "apasz_zigzag_start_curve_radius": "Promień łuku na początku",
+        "apasz_zigzag_end_curve_radius": "Promień łuku na końcu"
     },
     "pt_BR": {
         "apasz_zigzag_name": "Estação em zigue-zague",
@@ -197,7 +242,12 @@
         "apasz_zigzag_cost_mode_module": "Custo dos módulos",
         "apasz_zigzag_cost_mode_station": "Custo da estação",
         "apasz_zigzag_off": "Desativado",
-        "apasz_zigzag_on": "Ativado"
+        "apasz_zigzag_on": "Ativado",
+        "apasz_zigzag_straight": "Reta",
+        "apasz_zigzag_curve_radius_tooltip": "Negativo: esquerda. Zero: reta. Positivo: direita. Cada controle curva uma metade da estação. Valores iguais formam uma curva contínua; sinais opostos formam uma curva em S.",
+        "apasz_zigzag_curve_radius_too_small": "O raio de %d m é muito pequeno. Use pelo menos %d m para este trilho e estas dimensões de estação.",
+        "apasz_zigzag_start_curve_radius": "Raio da curva inicial",
+        "apasz_zigzag_end_curve_radius": "Raio da curva final"
     },
     "ru": {
         "apasz_zigzag_name": "Зигзагообразная станция",
@@ -217,7 +267,12 @@
         "apasz_zigzag_cost_mode_module": "Стоимость модулей",
         "apasz_zigzag_cost_mode_station": "Стоимость станции",
         "apasz_zigzag_off": "Выкл.",
-        "apasz_zigzag_on": "Вкл."
+        "apasz_zigzag_on": "Вкл.",
+        "apasz_zigzag_straight": "Прямо",
+        "apasz_zigzag_curve_radius_tooltip": "Отрицательное значение: влево. Ноль: прямо. Положительное значение: вправо. Каждый регулятор изгибает половину станции. Одинаковые значения образуют непрерывную кривую, противоположные знаки — S-образную кривую.",
+        "apasz_zigzag_curve_radius_too_small": "Радиус %d м слишком мал. Для этого пути, ширины и длины станции требуется не менее %d м.",
+        "apasz_zigzag_start_curve_radius": "Радиус кривой в начале",
+        "apasz_zigzag_end_curve_radius": "Радиус кривой в конце"
     },
     "zh_CN": {
         "apasz_zigzag_name": "折返站",
@@ -237,7 +292,12 @@
         "apasz_zigzag_cost_mode_module": "模块费用",
         "apasz_zigzag_cost_mode_station": "车站费用",
         "apasz_zigzag_off": "关闭",
-        "apasz_zigzag_on": "开启"
+        "apasz_zigzag_on": "开启",
+        "apasz_zigzag_straight": "直线",
+        "apasz_zigzag_curve_radius_tooltip": "负值：左弯。零：直线。正值：右弯。每个滑块控制车站的一半。相同数值形成连续曲线；相反符号形成S形曲线。",
+        "apasz_zigzag_curve_radius_too_small": "曲线半径 %d 米过小。此轨道及车站宽度和长度至少需要 %d 米。",
+        "apasz_zigzag_start_curve_radius": "起点端曲线半径",
+        "apasz_zigzag_end_curve_radius": "终点端曲线半径"
     },
     "zh_TW": {
         "apasz_zigzag_name": "折返站",
@@ -257,6 +317,11 @@
         "apasz_zigzag_cost_mode_module": "模組費用",
         "apasz_zigzag_cost_mode_station": "車站費用",
         "apasz_zigzag_off": "關閉",
-        "apasz_zigzag_on": "開啟"
+        "apasz_zigzag_on": "開啟",
+        "apasz_zigzag_straight": "直線",
+        "apasz_zigzag_curve_radius_tooltip": "負值：左彎。零：直線。正值：右彎。每個滑桿控制車站的一半。相同數值形成連續曲線；相反符號形成S形曲線。",
+        "apasz_zigzag_curve_radius_too_small": "曲線半徑 %d 公尺過小。此軌道及車站寬度和長度至少需要 %d 公尺。",
+        "apasz_zigzag_start_curve_radius": "起點端曲線半徑",
+        "apasz_zigzag_end_curve_radius": "終點端曲線半徑"
     }
 }

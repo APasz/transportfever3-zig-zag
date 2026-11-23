@@ -54,11 +54,13 @@ local record CostCaptureParams
     costMode: ZigzagCostMode
     trackCostProfiles: {string: ZigzagTrackCostProfile}
     platformCostProfiles: {ZigzagPlatformCostProfile}
+    trackMinimumRadiiMetres: {string: number}
 end
 
 local record TrackCatalog
     profiles: {string: ZigzagTrackCostProfile}
     choices: {ZigzagTrackChoice}
+    minimumRadiiMetres: {string: number}
 end
 
 local record ConstructionUpdateScript
@@ -296,10 +298,24 @@ local function collectTrackCatalog(
 ): TrackCatalog
     local profiles: {string: ZigzagTrackCostProfile} = {}
     local choices: {ZigzagTrackChoice} = {}
+    local minimumRadiiMetres: {string: number} = {}
     -- Invisible templates can still be referenced by saved stations and upgrades.
     for templateId, resourceName in pairs(api.res.streetTemplateRep.getAll(true)) do
         local template = api.res.streetTemplateRep.get(templateId)
         if trackSelection.isRailwayTrack(template) then
+            if isFiniteNonNegativeNumber(template.minCurveRadius)
+                and isFiniteNonNegativeNumber(template.minCurveRadiusBuild)
+            then
+                minimumRadiiMetres[resourceName] = math.max(
+                    template.minCurveRadius, template.minCurveRadiusBuild
+                )
+            else
+                logger.warnOnce(
+                    "minimum-radius:" .. resourceName,
+                    "Missing or invalid minimum radius for track " .. resourceName
+                        .. "; curved stations require valid minimum-radius data"
+                )
+            end
             if mode ~= "NO_COST" then
                 local profile: ZigzagTrackCostProfile = {}
                 if mode == "TRACK_COST" then
@@ -353,7 +369,7 @@ local function collectTrackCatalog(
         end
         return first.resourceName < second.resourceName
     end)
-    return { profiles = profiles, choices = choices }
+    return { profiles = profiles, choices = choices, minimumRadiiMetres = minimumRadiiMetres }
 end
 
 local function platformModuleName(prefix: string, era: string): string
@@ -733,6 +749,7 @@ local function configureConstruction(
     params.costMode = mode
     params.trackCostProfiles = catalog.profiles
     params.platformCostProfiles = platformProfiles
+    params.trackMinimumRadiiMetres = catalog.minimumRadiiMetres
 
     local updateScript = api.type.ScriptRef.new()
     updateScript.fileName = existingUpdateScript.fileName

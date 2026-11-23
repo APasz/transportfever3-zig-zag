@@ -68,6 +68,8 @@ global record ZigzagConstructionParams
     trackSpacingMetres: integer | nil
     lengthMetres: integer | nil
     length: integer | nil
+    signedStartCurveRadiusMetres: integer | nil
+    signedEndCurveRadiusMetres: integer | nil
     passengerLoadingEnabled: integer | nil
     passengerCapacityMultiplier: number | nil
     cargoLoadingEnabled: integer | nil

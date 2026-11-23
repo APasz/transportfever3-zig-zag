@@ -180,6 +180,7 @@ package.preload["::/scripts/vec3.tl"] = function()
         end,
     }
 end
+package.preload["/scripts/vec3.tl"] = package.preload["::/scripts/vec3.tl"]
 package.preload["::/scripts/construction/laneutil.lua"] = function()
     return {
         createLane = function(curves, transportModes, speedLimit, width, linkable)
@@ -205,10 +206,31 @@ package.preload["::/scripts/construction/laneutil.lua"] = function()
     }
 end
 
-for _, moduleName in ipairs({ "track_selection", "station_definition" }) do
+package.preload["::/scripts/construction/street_util_serialized.tl"] = function()
+    if arg[1] ~= nil then
+        return assert(loadfile(arg[1]))()
+    end
+    return {
+        calcScale = function(chord, angle)
+            assert(angle <= math.rad(10) + 1e-12, "curve segment exceeds ten degrees")
+            return angle < 0.001 and chord or chord * angle / (2 * math.sin(angle / 2))
+        end,
+    }
+end
+
+for _, moduleName in ipairs({ "track_selection", "station_definition", "validation_metadata" }) do
     package.preload["apasz_zigzag::/zigzag/" .. moduleName .. ".lua"] = function()
         return assert(loadfile("content/zigzag/" .. moduleName .. ".lua"))()
     end
+end
+
+package.preload["::/scripts/metadata_util.tl"] = function()
+    return { constructionInstance = { register = function(key)
+        return {
+            set = function(container, value) container[key] = value end,
+            get = function(container) return container and container[key] end,
+        }
+    end } }
 end
 
 package.preload["apasz_zigzag::/zigzag/logging_config.lua"] = function()
@@ -226,6 +248,9 @@ _G.ug_require = function(resourceName)
 end
 
 _G._ = function(value)
+    if value == "apasz_zigzag_curve_radius_too_small" then
+        return "Curve radius %d m is too small. Use at least %d m for this track, station width and length."
+    end
     return value
 end
 
@@ -256,6 +281,8 @@ local function makeTrackTemplate(
         catenaryRemove = catenaryRemove,
         cost = constructionCost,
         maintenanceCost = maintenanceCost,
+        minCurveRadius = 40,
+        minCurveRadiusBuild = 55,
     }
 end
 
@@ -406,7 +433,7 @@ assertEqual(
     "zigzag_preview.tga",
     "menu preview icon"
 )
-assertEqual(#constructionTemplate.params, 8, "build-template parameter count")
+assertEqual(#constructionTemplate.params, 10, "build-template parameter count")
 assertEqual(#construction.params[1].values, #expectedTrackCounts, "track-count option count")
 assertEqual(construction.params[1].name, "apasz_zigzag_tracks", "tracks localization key")
 assertEqual(construction.params[1].defaultIndex, 1, "default one-track index")
@@ -454,13 +481,13 @@ for index, lengthMetres in ipairs(expectedLengthsMetres) do
         "length label " .. tostring(index)
     )
 end
-assertEqual(construction.params[4].key, "trackType", "default track selector order")
-assertEqual(construction.params[4].defaultIndex, 2, "default-era standard track")
-assertEqual(construction.params[5].key, "trackType", "high-speed track selector order")
-assertEqual(construction.params[5].defaultIndex, 2, "high-speed-era standard track")
-assertEqual(construction.params[6].key, "catenary", "catenary selector order")
+assertEqual(construction.params[6].key, "trackType", "default track selector order")
+assertEqual(construction.params[6].defaultIndex, 2, "default-era standard track")
+assertEqual(construction.params[7].key, "trackType", "high-speed track selector order")
+assertEqual(construction.params[7].defaultIndex, 2, "high-speed-era standard track")
+assertEqual(construction.params[8].key, "catenary", "catenary selector order")
 
-local passengerLoadingParam = construction.params[7]
+local passengerLoadingParam = construction.params[9]
 assertEqual(
     passengerLoadingParam.key,
     "passengerLoadingEnabled",
@@ -476,7 +503,7 @@ assertEqual(passengerLoadingParam.defaultIndex, 1, "passenger loading disabled b
 assertEqual(passengerLoadingParam.values[1], "apasz_zigzag_off", "passenger loading disabled label")
 assertEqual(passengerLoadingParam.values[2], "apasz_zigzag_on", "passenger loading enabled label")
 
-local passengerCapacityParam = construction.params[8]
+local passengerCapacityParam = construction.params[10]
 assertEqual(
     passengerCapacityParam.key,
     "passengerCapacityMultiplier",
@@ -502,7 +529,7 @@ for index, multiplier in ipairs(expectedPassengerCapacityMultipliers) do
     )
 end
 
-local cargoLoadingParam = construction.params[9]
+local cargoLoadingParam = construction.params[11]
 assertEqual(cargoLoadingParam.key, "cargoLoadingEnabled", "cargo-loading parameter key")
 assertEqual(
     cargoLoadingParam.name,
@@ -514,7 +541,7 @@ assertEqual(cargoLoadingParam.defaultIndex, 1, "cargo loading disabled by defaul
 assertEqual(cargoLoadingParam.values[1], "apasz_zigzag_off", "cargo loading disabled label")
 assertEqual(cargoLoadingParam.values[2], "apasz_zigzag_on", "cargo loading enabled label")
 
-local catchmentRadiusParam = construction.params[10]
+local catchmentRadiusParam = construction.params[12]
 assertEqual(catchmentRadiusParam.key, "catchmentRadiusMetres", "catchment parameter key")
 assertEqual(
     catchmentRadiusParam.name,
@@ -718,14 +745,25 @@ do
     local handleEvent = registeredCallback(descriptor.handleEventScript)
     local guiHandleEvent = registeredCallback(descriptor.guiHandleEventScript)
     local subscriptions = {}
+    local savedState = {}
     local state = {
+        get = function() return savedState end,
+        set = function(_, value) savedState = value end,
         hasEventSubscriptions = function() return #subscriptions > 0 end,
         subscribeToEvent = function(_, name) subscriptions[#subscriptions + 1] = name end,
     }
     update({}, state, 0)
     update({}, state, 0)
-    assertEqual(#subscriptions, 1, "subscribe to selection once")
+    assertEqual(#subscriptions, 3, "subscribe to selection and build validation once")
     assertEqual(subscriptions[1], "select", "subscribe to the native selection event")
+    assertEqual(subscriptions[2], "builder.proposalCreate", "validate construction previews")
+    assertEqual(subscriptions[3], "builder.proposalPrepareForApply", "validate before applying construction")
+    subscriptions, savedState = { "select" }, {}
+    update({}, state, 0)
+    assertEqual(#subscriptions, 4, "existing selection subscriptions gain build validation")
+    subscriptions = {}
+    update({}, state, 0)
+    assertEqual(#subscriptions, 3, "restore event subscriptions when the engine resets them")
     assertEqual(handleEvent({}, state, "", "mainView", "select", 104), nil,
         "simulation handler leaves selection unchanged")
 
@@ -3129,6 +3167,385 @@ do
         templates["custom.track"].cost = originalCost
     end
 
+    do
+        local template = templates["custom.track"]
+        local originalRadius = template.minCurveRadius
+        for _, invalidRadius in ipairs({ -1, math.huge, 0 / 0, "55" }) do
+            template.minCurveRadius = invalidRadius
+            local configured = configureMode(1)
+            assertEqual(configured.updateScript.params.trackMinimumRadiiMetres["custom.track"], nil,
+                "invalid radius metadata is not captured")
+            assert(runRestrictedUpdateWithCapture(configured.updateScript.params,
+                { streetTemplate = "custom.track" }), "invalid modded radius metadata preserves straight stations")
+            local ok, message = pcall(runRestrictedUpdateWithCapture, configured.updateScript.params,
+                { streetTemplate = "custom.track", signedStartCurveRadiusMetres = 300 })
+            assert(not ok and tostring(message):find("no minimum-radius data", 1, true),
+                "curved stations require valid selected-track radius data")
+        end
+        template.minCurveRadius = originalRadius
+    end
+
 end
+
+(function()
+    local function assertNear(actual, expected, tolerance, context)
+        assert(math.abs(actual - expected) <= tolerance,
+            string.format("%s: expected %.12g, got %.12g", context, expected, actual))
+    end
+
+    local function assertSameResult(actual, expected, context)
+        if type(expected) ~= "table" then
+            assertEqual(actual, expected, context)
+            return
+        end
+        assertEqual(type(actual), "table", context .. " type")
+        for key, value in pairs(expected) do
+            assertSameResult(actual[key], value, context .. "." .. tostring(key))
+        end
+        for key in pairs(actual) do
+            assert(expected[key] ~= nil, context .. " unexpected field " .. tostring(key))
+        end
+    end
+
+    local curveCapture = defaultCostConstruction.updateScript.params
+    local radiusErrorTemplate = _("apasz_zigzag_curve_radius_too_small")
+    local validationMetadata = require("apasz_zigzag::/zigzag/validation_metadata.lua")
+    local validator = loadData("content/stations/rail/zigzag/zigzag.selection.script.lua")
+    local function validateResults(results, expectedMessages)
+        local additions = {}
+        for _, result in ipairs(results) do
+            additions[#additions + 1] = { construction = { persistentMetadata = result.metadata } }
+        end
+        local proposal = { toAdd_native = {
+            size = function() return #additions end,
+            at = function(_, index) return additions[index] end,
+        } }
+        for _, event in ipairs({ "builder.proposalCreate", "builder.proposalPrepareForApply" }) do
+            local result = validator.guiHandleEvent({}, {}, {}, "", "constructionBuilder", event, { proposal, {} })
+            if expectedMessages == nil then
+                assertEqual(result, nil, "valid and unrelated proposals are left unchanged")
+            else
+                local expected = {}
+                for _, message in ipairs(expectedMessages) do expected[message] = true end
+                assertSameResult(result.errorMessages, expected, "native builder errors")
+            end
+        end
+        assertEqual(validator.guiHandleEvent({}, {}, {}, "", "constructionBuilder", "builder.proposalApply",
+            { proposal, {} }), nil, "completed builds are left unchanged")
+    end
+    validateResults({}, nil)
+    validateResults({ {}, { metadata = { unrelated = { "Other mod" } } } }, nil)
+    local startParam, endParam = construction.params[4], construction.params[5]
+    assertEqual(startParam.key, "signedStartCurveRadiusMetres", "start radius control follows length")
+    assertEqual(endParam.key, "signedEndCurveRadiusMetres", "end radius control follows start")
+    assertEqual(startParam.name, "apasz_zigzag_start_curve_radius", "start control label")
+    assertEqual(endParam.name, "apasz_zigzag_end_curve_radius", "end control label")
+    for _, param in ipairs({ startParam, endParam }) do
+        assertEqual(param.uiType, "Slider", "independent curve slider")
+        assertEqual(param.numbers[param.defaultIndex], 0, "straight by default")
+        assertEqual(param.checkEnabledScript, nil, "curve slider is always visible")
+        assertEqual(param.numbers[1], -2000, "left endpoint of curve slider")
+        assertEqual(param.numbers[#param.numbers], 2000, "right endpoint of curve slider")
+        assertEqual(param.values[1], "-2000 m", "negative radius label")
+        assertEqual(param.values[#param.values], "+2000 m", "positive radius label")
+        assertEqual(param.values[param.defaultIndex], "0 (apasz_zigzag_straight)", "straight label")
+        assertSameResult(param.numbers, startParam.numbers, "both controls use the same steps")
+        for index, radius in ipairs(param.numbers) do
+            assertEqual(radius, -param.numbers[#param.numbers + 1 - index], "symmetric curve steps")
+            if index > 1 then
+                assert(radius > param.numbers[index - 1], "curve slider is sorted")
+            end
+        end
+    end
+    assertEqual(curveCapture.trackMinimumRadiiMetres["standard.track"], 55, "native build-radius limit")
+    assertEqual(curveCapture.trackMinimumRadiiMetres[
+        "::/industries/shared/industry_track/industry.street_template"
+    ], 55, "hidden saved track has radius data")
+
+    local function assertPointOnHalf(point, offset, radius, tolerance)
+        assertNear(point[3], 0, 1e-12, "track stays level")
+        if radius == 0 then
+            assertNear(point[1], offset, tolerance, "straight half stays straight")
+        else
+            local distance = math.sqrt((point[1] - radius) ^ 2 + point[2] ^ 2)
+            assertNear(distance, math.abs(radius - offset), tolerance, "concentric half radius")
+        end
+    end
+
+    local function assertNodeOnHalf(node, offset, radius)
+        local point, tangent = node[1], node[2]
+        assertPointOnHalf(point, offset, radius, 1e-9)
+        if radius == 0 then
+            assertNear(tangent[1], 0, 1e-12, "straight half tangent")
+        else
+            assertNear((point[1] - radius) * tangent[1] + point[2] * tangent[2],
+                0, 1e-7, "tangent follows half circle")
+        end
+    end
+
+    local function distanceFromMidpoint(point, offset, radius)
+        if radius == 0 then return math.abs(point[2]) end
+        local physicalRadius = math.abs(radius - offset)
+        local chord = math.sqrt((point[1] - offset) ^ 2 + point[2] ^ 2)
+        return 2 * physicalRadius * math.asin(chord / (2 * physicalRadius))
+    end
+
+    local function halfLengthScale(radius, offset)
+        return radius == 0 and 1 or math.abs(radius - offset) / math.abs(radius)
+    end
+
+    local function checkLayout(params)
+        local result = runRestrictedUpdateWithCapture(curveCapture, params)
+        local track = result.edgeLists[1]
+        local sub = result.subconstructions[1]
+        local station = sub.station
+        local startRadius, endRadius = params.signedStartCurveRadiusMetres or 0, params.signedEndCurveRadiusMetres or 0
+        local trackCount, spacing, length = params.tracks, params.trackSpacingMetres, params.lengthMetres
+        local loading = params.passengerLoadingEnabled == 2 or params.cargoLoadingEnabled == 2
+        local function radiusAt(y) return y < 0 and startRadius or endRadius end
+        assertEqual(#track.snapNodes, trackCount * 2, "two endpoints per track")
+        assertEqual(#station.terminals, trackCount * (loading and 2 or 1), "terminal count")
+        assertUniqueTerminalVehicleNodes(station.terminals, track, "independent stop nodes")
+        assertNoOverlappingLaneEdges(sub.laneLists, "independent loading lanes")
+        assertNear(result.cost, length * trackCount / 40 * moduleCostRates["standard.track"].construction,
+            1e-7, "independent curves preserve total track cost")
+        for i = 1, trackCount do
+            local offset = (i - (trackCount + 1) / 2) * spacing
+            local physicalLength = length / 2 * (halfLengthScale(startRadius, offset) + halfLengthScale(endRadius, offset))
+            local first, last = track.snapNodes[2 * i - 1] + 1, track.snapNodes[2 * i] + 1
+            assert(first < last and first % 2 == 1 and last % 2 == 0, "valid endpoint indices")
+            local centreNodeCount = 0
+            for nodeIndex = first, last do
+                local node = track.edges[nodeIndex]
+                assertNodeOnHalf(node, offset, radiusAt(node[1][2]))
+                if node[1][2] == 0 then
+                    centreNodeCount = centreNodeCount + 1
+                    assertNear(node[1][1], offset, 1e-12, "shared midpoint")
+                    assertNear(node[2][1], 0, 1e-12, "shared midpoint heading")
+                    assert(node[2][2] > 0, "midpoint tangent has forward direction")
+                end
+            end
+            assertEqual(centreNodeCount, 2, "both halves meet at the midpoint")
+            for nodeIndex = first, last - 1, 2 do
+                local a, b = track.edges[nodeIndex], track.edges[nodeIndex + 1]
+                local radius = radiusAt((a[1][2] + b[1][2]) / 2)
+                local ta, tb = math.atan(a[2][1], a[2][2]), math.atan(b[2][1], b[2][2])
+                assert(math.abs(tb - ta) <= math.rad(10) + 1e-12, "bounded segment turn")
+                if nodeIndex + 2 <= last then
+                    local following = track.edges[nodeIndex + 2]
+                    for axis = 1, 3 do
+                        assertNear(b[1][axis], following[1][axis], 1e-9, "continuous edge positions")
+                    end
+                    local cross = b[2][1] * following[2][2] - b[2][2] * following[2][1]
+                    local dot = b[2][1] * following[2][1] + b[2][2] * following[2][2]
+                    assert(dot > 0 and math.abs(cross) <= 1e-9 * dot, "no tangent kink between edges")
+                end
+                for sample = 1, 3 do
+                    local t = sample / 4
+                    local h0, h1 = 2 * t ^ 3 - 3 * t ^ 2 + 1, t ^ 3 - 2 * t ^ 2 + t
+                    local h2, h3 = -2 * t ^ 3 + 3 * t ^ 2, t ^ 3 - t ^ 2
+                    local point = {}
+                    for axis = 1, 3 do
+                        point[axis] = h0 * a[1][axis] + h1 * a[2][axis] + h2 * b[1][axis] + h3 * b[2][axis]
+                    end
+                    assertPointOnHalf(point, offset, radius, math.max(math.abs(radius - offset) * 3e-6, 1e-9))
+                end
+            end
+            for endpoint, radius in ipairs({ startRadius, endRadius }) do
+                local nodeIndex = endpoint == 1 and first or last
+                assertNear(distanceFromMidpoint(track.edges[nodeIndex][1], offset, radius),
+                    length / 2 * halfLengthScale(radius, offset), 1e-9, "physical half length")
+                if i > 1 then
+                    local previousIndex = track.snapNodes[2 * (i - 1) - (2 - endpoint)] + 1
+                    local previous, current = track.edges[previousIndex][1], track.edges[nodeIndex][1]
+                    assertNear(math.sqrt((current[1] - previous[1]) ^ 2 + (current[2] - previous[2]) ^ 2),
+                        spacing, 1e-9, "constant track spacing at both endpoints")
+                end
+            end
+            if loading then
+                local passenger, cargo = station.terminals[2 * i - 1], station.terminals[2 * i]
+                local passengerStop = track.edges[passenger.vehicleNode[2] + 1][1]
+                local cargoStop = track.edges[cargo.vehicleNode[2] + 1][1]
+                assert(passengerStop[2] < 0 and cargoStop[2] > 0, "stops straddle the midpoint")
+                assertNear(distanceFromMidpoint(passengerStop, offset, startRadius), 0.5, 1e-9, "passenger stop offset")
+                assertNear(distanceFromMidpoint(cargoStop, offset, endRadius), 0.5, 1e-9, "cargo stop offset")
+                for _, terminal in ipairs({ passenger, cargo }) do
+                    local lane = sub.laneLists[terminal.personNodes[1][1] + 1]
+                    if #terminal.cargoTransferSpeeds > 0 then
+                        assertEqual(#terminal.personEdges, #lane.nodes / 2, "all loading edges referenced")
+                        local centre = lane.nodes[terminal.personNodes[1][2] + 1][1]
+                        assertNear(centre[2], 0, 1e-12, "loading centre-node reference")
+                        assertNear(terminal.cargoTransferSpeeds[1].length, physicalLength, 1e-9, "physical loading length")
+                        local laneOffset = offset + (terminal.passengers and -0.5 or 0.5)
+                        for _, node in ipairs(lane.nodes) do
+                            assertNodeOnHalf(node, laneOffset, radiusAt(node[1][2]))
+                        end
+                    end
+                end
+            else
+                local stop = track.edges[station.terminals[i].vehicleNode[2] + 1][1]
+                assertNear(stop[1], offset, 1e-12, "non-loading stop stays centred")
+                assertNear(stop[2], 0, 1e-12, "non-loading stop stays at origin heading")
+            end
+        end
+        if loading then
+            for index, catchment in ipairs(station.catchmentAreas) do
+                local radius = radiusAt(catchment.position[2])
+                assertPointOnHalf(catchment.position, 0, radius, 1e-9)
+                assertNear(distanceFromMidpoint(catchment.position, 0, radius),
+                    index == 2 and 0 or length / 2, 1e-9, "catchment follows each half")
+            end
+        end
+        if params.passengerLoadingEnabled == 2 then
+            for accessIndex = trackCount * 2 + 1, #sub.laneLists do
+                local access = sub.laneLists[accessIndex]
+                for _, node in ipairs(access.nodes) do
+                    local connections = 0
+                    for laneIndex = 1, trackCount * 2, 2 do
+                        for _, serviceNode in ipairs(sub.laneLists[laneIndex].nodes) do
+                            if pointKey(node[1]) == pointKey(serviceNode[1]) then connections = connections + 1 end
+                        end
+                    end
+                    if node ~= access.nodes[1] and node ~= access.nodes[#access.nodes] then
+                        assert(connections > 0, "passenger access connects to each service lane")
+                    end
+                end
+            end
+        end
+        return result
+    end
+
+    for _, startRadius in ipairs(startParam.numbers) do
+        for _, endRadius in ipairs(endParam.numbers) do
+            for _, length in ipairs({ 5, 440 }) do
+                for _, count in ipairs({ 1, 8 }) do
+                    for passengerMode = 1, 2 do
+                        for cargoMode = 1, 2 do
+                            local params = { signedStartCurveRadiusMetres = startRadius, signedEndCurveRadiusMetres = endRadius,
+                                lengthMetres = length, tracks = count, trackSpacingMetres = 20,
+                                passengerLoadingEnabled = passengerMode, cargoLoadingEnabled = cargoMode }
+                            local requiredRadius = math.max(55 + (count - 1) * 10, length / math.pi)
+                            local rejectedEnd = startRadius ~= 0 and math.abs(startRadius) < requiredRadius and "start"
+                                or (endRadius ~= 0 and math.abs(endRadius) < requiredRadius and "end" or nil)
+                            local result = checkLayout(params)
+                            if rejectedEnd == nil then
+                                assertEqual(result.metadata, nil, "valid curves need no validation metadata")
+                            else
+                                local messages = validationMetadata.get(result.metadata)
+                                local expected = {}
+                                for _, side in ipairs({ { "start", startRadius }, { "end", endRadius } }) do
+                                    if side[2] ~= 0 and math.abs(side[2]) < requiredRadius then
+                                        expected[#expected + 1] = "apasz_zigzag_" .. side[1] .. "_curve_radius: "
+                                            .. string.format(radiusErrorTemplate,
+                                                math.abs(side[2]), math.ceil(requiredRadius))
+                                    end
+                                end
+                                assertSameResult(messages, expected, "validation identifies each rejected end and minimum radius")
+                                validateResults({ {}, result, result }, messages)
+                                assertEqual(params.signedStartCurveRadiusMetres, startRadius, "start radius is never changed")
+                                assertEqual(params.signedEndCurveRadiusMetres, endRadius, "end radius is never changed")
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    for passengerMode = 1, 2 do
+        for cargoMode = 1, 2 do
+            local params = { signedStartCurveRadiusMetres = 0, signedEndCurveRadiusMetres = 0,
+                lengthMetres = 440, tracks = 8, trackSpacingMetres = 20,
+                passengerLoadingEnabled = passengerMode, cargoLoadingEnabled = cargoMode }
+            local straight = runRestrictedUpdateWithCapture(curveCapture, params)
+            params.signedStartCurveRadiusMetres, params.signedEndCurveRadiusMetres = nil, nil
+            assertSameResult(straight, runRestrictedUpdateWithCapture(curveCapture, params), "zero radii preserve the straight layout")
+        end
+    end
+    do
+        local committedCapture = {}
+        for key, value in pairs(curveCapture) do committedCapture[key] = value end
+        committedCapture.curveRadiiMetres, committedCapture.trackMinimumRadiiMetres = nil, nil
+        assertSameResult(runRestrictedUpdateWithCapture(committedCapture, {}),
+            runRestrictedUpdateWithCapture(curveCapture, {}), "committed capture parameters still build straight stations")
+    end
+    for _, key in ipairs({ startParam.key, endParam.key }) do
+        for _, radius in ipairs({ -99, 99, -2001, 2001 }) do
+            assertEqual(pcall(script.updateFn, curveCapture, { [key] = radius }), false, "invalid end radius rejected")
+        end
+    end
+
+    local function buildShape(startRadius, endRadius)
+        return checkLayout({ signedStartCurveRadiusMetres = startRadius, signedEndCurveRadiusMetres = endRadius,
+            lengthMetres = 120, tracks = 3, trackSpacingMetres = 20, passengerLoadingEnabled = 2, cargoLoadingEnabled = 2 })
+    end
+    local left, right = buildShape(-300, -300), buildShape(300, 300)
+    for i, leftIndex in ipairs(left.edgeLists[1].snapNodes) do
+        local reversedTrack = 3 - math.floor((i - 1) / 2)
+        local rightIndex = right.edgeLists[1].snapNodes[2 * reversedTrack - (i % 2)]
+        local a, b = left.edgeLists[1].edges[leftIndex + 1], right.edgeLists[1].edges[rightIndex + 1]
+        assertNear(a[1][1], -b[1][1], 1e-9, "left and right endpoint mirror")
+        assertNear(a[1][2], b[1][2], 1e-9, "left and right longitudinal mirror")
+    end
+    local oneEnd, sCurve = buildShape(0, -300), buildShape(-300, 300)
+    buildShape(-500, 0)
+    local centreStartIndex, centreEndIndex = sCurve.edgeLists[1].snapNodes[3] + 1, sCurve.edgeLists[1].snapNodes[4] + 1
+    assert(sCurve.edgeLists[1].edges[centreStartIndex][1][1] < 0
+        and sCurve.edgeLists[1].edges[centreEndIndex][1][1] > 0, "opposite signs make an S-curve")
+    for index, expected in ipairs({ 197, 204, 211 }) do
+        assertEqual(oneEnd.subconstructions[1].station.terminals[2 * index - 1].capacity,
+            expected, "asymmetric passenger capacity")
+        assertEqual(sCurve.subconstructions[1].station.terminals[2 * index - 1].cargoTransferSpeeds[1].length,
+            120, "equal opposite curves balance physical track length")
+    end
+    for _, signedRadius in ipairs({ 300, 500 }) do
+        local mixed = buildShape(signedRadius, -150)
+        local changedEnd = buildShape(signedRadius, 1000)
+        local changedStart = buildShape(-1000, -150)
+        local function centreTrackEndpoints(result)
+            local track = result.edgeLists[1]
+            return track.edges[track.snapNodes[3] + 1][1], track.edges[track.snapNodes[4] + 1][1]
+        end
+        local first, last = centreTrackEndpoints(mixed)
+        local fixedStart, movedEnd = centreTrackEndpoints(changedEnd)
+        local movedStart, fixedEnd = centreTrackEndpoints(changedStart)
+        for axis = 1, 3 do
+            assertEqual(first[axis], fixedStart[axis], "changing end leaves start fixed")
+            assertEqual(last[axis], fixedEnd[axis], "changing start leaves end fixed")
+        end
+        assert(first[1] ~= movedStart[1] and last[1] ~= movedEnd[1], "each slider changes its own end")
+    end
+
+    local params = { signedStartCurveRadiusMetres = -300, signedEndCurveRadiusMetres = 500,
+        lengthMetres = 120, streetTemplate = "standard.track", catenary = 1 }
+    script.upgradeFn(construction.upgradeScript.params, params, 0, { catenary = 2 })
+    assertEqual(params.signedStartCurveRadiusMetres, -300, "catenary upgrade preserves start radius")
+    assertEqual(params.signedEndCurveRadiusMetres, 500, "catenary upgrade preserves end radius")
+    assertEqual(runRestrictedUpdateWithCapture(curveCapture, params).edgeLists[1].params.type,
+        "standard_catenary.track", "asymmetric catenary upgrade")
+    do
+        local capture = {}
+        for key, value in pairs(curveCapture) do capture[key] = value end
+        capture.trackMinimumRadiiMetres = { ["high_speed.track"] = 350 }
+        script.upgradeFn(construction.upgradeScript.params, params, 0, { streetTemplate = "high_speed.track" })
+        local result = runRestrictedUpdateWithCapture(capture, params)
+        local messages = validationMetadata.get(result.metadata)
+        assertEqual(#messages, 1, "upgrades validate the new track's radius at each end")
+        assert(messages[1]:find("Use at least 350 m", 1, true), "upgrade uses new track minimum")
+        validateResults({ result }, messages)
+        assertEqual(params.signedStartCurveRadiusMetres, -300, "rejected upgrade preserves start radius")
+        assertEqual(params.signedEndCurveRadiusMetres, 500, "rejected upgrade preserves end radius")
+    end
+
+    local builder = configuredBuilders[defaultCostConstruction]
+    local templateScript = loadData("content/stations/rail/zigzag/zigzag.template.script.lua")
+    local built = runRestrictedCallback(templateScript.createTemplateFn, builder.createTemplateScript.params,
+        { signedStartCurveRadiusMetres = -500, signedEndCurveRadiusMetres = 300, lengthMetres = 440 })
+    local saved = built.constructions[1].params
+    assertEqual(saved.signedStartCurveRadiusMetres, -500, "template persists start radius")
+    assertEqual(saved.signedEndCurveRadiusMetres, 300, "template persists end radius")
+    assert(#runRestrictedUpdateWithCapture(curveCapture, saved).edgeLists[1].edges > 8,
+        "saved asymmetric placement regenerates subdivided geometry")
+end)()
 
 print("zigzag_check: ok")

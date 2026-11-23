@@ -1,21 +1,58 @@
 local SELECT_EVENT = "select"
+local PROPOSAL_CREATE_EVENT = "builder.proposalCreate"
+local PROPOSAL_PREPARE_EVENT = "builder.proposalPrepareForApply"
+local validationMetadata = ug_require(
+    "apasz_zigzag::/zigzag/validation_metadata.lua"
+) as MetadataAccessor<ConstructionInstanceMetadata, {string}>
 
 local record SelectionParams
     constructionFileName: ResName
 end
 
-local selection: GameScriptWithGui<table, table> = {}
+local record SelectionState
+    builderValidationSubscribed: boolean | nil
+end
 
-function selection.update(_captureParams: table, state: GameScriptState<table>, _dt: number): any
-    if not state:hasEventSubscriptions() then
+local record ProposalValidationResult
+    errorMessages: {string: boolean}
+end
+
+local function validateProposal(proposal: Proposal): ProposalValidationResult | nil
+    local errors: {string: boolean} | nil = nil
+    for index = 1, proposal.toAdd_native:size() do
+        local added = proposal.toAdd_native:at(index)
+        local messages = validationMetadata.get(added.construction.persistentMetadata)
+        if messages ~= nil then
+            for _, message in ipairs(messages) do
+                local currentErrors: {string: boolean} = errors or {}
+                currentErrors[message] = true
+                errors = currentErrors
+            end
+        end
+    end
+    if errors == nil then
+        return nil
+    end
+    return { errorMessages = errors }
+end
+
+local selection: GameScriptWithGui<SelectionState, table> = {}
+
+function selection.update(_captureParams: table, state: GameScriptState<SelectionState>, _dt: number): any
+    local current = state:get()
+    if not state:hasEventSubscriptions() or not current.builderValidationSubscribed then
         state:subscribeToEvent(SELECT_EVENT)
+        state:subscribeToEvent(PROPOSAL_CREATE_EVENT)
+        state:subscribeToEvent(PROPOSAL_PREPARE_EVENT)
+        current.builderValidationSubscribed = true
+        state:set(current)
     end
     return nil
 end
 
 function selection.handleEvent(
     _captureParams: table,
-    _state: GameScriptState<table>,
+    _state: GameScriptState<SelectionState>,
     _src: string,
     _id: string,
     _name: string,
@@ -26,13 +63,17 @@ end
 
 function selection.guiHandleEvent(
     captureParams: table,
-    _state: GameScriptStateReadOnly<table>,
+    _state: GameScriptStateReadOnly<SelectionState>,
     _guiState: GameScriptState<table>,
     _src: string,
     id: string,
     name: string,
     param: any
 ): any
+    if name == PROPOSAL_CREATE_EVENT or name == PROPOSAL_PREPARE_EVENT then
+        local proposalAndData = param as {Proposal, ProposalData}
+        return validateProposal(proposalAndData[1])
+    end
     if id ~= "mainView" or name ~= SELECT_EVENT then
         return nil
     end

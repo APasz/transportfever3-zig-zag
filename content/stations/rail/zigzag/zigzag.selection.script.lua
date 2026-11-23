@@ -1,14 +1,51 @@
-local SELECT_EVENT = "select"
+local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local SELECT_EVENT = "select"
+local PROPOSAL_CREATE_EVENT = "builder.proposalCreate"
+local PROPOSAL_PREPARE_EVENT = "builder.proposalPrepareForApply"
+local validationMetadata = ug_require(
+"apasz_zigzag::/zigzag/validation_metadata.lua")
 
 
 
 
+
+
+
+
+
+
+
+
+
+
+local function validateProposal(proposal)
+   local errors = nil
+   for index = 1, proposal.toAdd_native:size() do
+      local added = proposal.toAdd_native:at(index)
+      local messages = validationMetadata.get(added.construction.persistentMetadata)
+      if messages ~= nil then
+         for _, message in ipairs(messages) do
+            local currentErrors = errors or {}
+            currentErrors[message] = true
+            errors = currentErrors
+         end
+      end
+   end
+   if errors == nil then
+      return nil
+   end
+   return { errorMessages = errors }
+end
 
 local selection = {}
 
 function selection.update(_captureParams, state, _dt)
-   if not state:hasEventSubscriptions() then
+   local current = state:get()
+   if not state:hasEventSubscriptions() or not current.builderValidationSubscribed then
       state:subscribeToEvent(SELECT_EVENT)
+      state:subscribeToEvent(PROPOSAL_CREATE_EVENT)
+      state:subscribeToEvent(PROPOSAL_PREPARE_EVENT)
+      current.builderValidationSubscribed = true
+      state:set(current)
    end
    return nil
 end
@@ -33,6 +70,10 @@ function selection.guiHandleEvent(
    name,
    param)
 
+   if name == PROPOSAL_CREATE_EVENT or name == PROPOSAL_PREPARE_EVENT then
+      local proposalAndData = param
+      return validateProposal(proposalAndData[1])
+   end
    if id ~= "mainView" or name ~= SELECT_EVENT then
       return nil
    end

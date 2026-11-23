@@ -13,6 +13,7 @@ local TRACK_COUNTS = { 1, 2, 3, 4, 5, 6, 7, 8 }
 local TRACK_SPACINGS_METRES = {
    3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
 }
+local CURVE_RADII_METRES = { 100, 150, 200, 300, 500, 1000, 2000 }
 local CATCHMENT_RADII_METRES = {
    50, 75, 100, 125, 150, 175, 200, 225, 250, 275, 300,
 }
@@ -58,6 +59,28 @@ local function makeMultiplierLabels(values)
    local labels = {}
    for _, value in ipairs(values) do
       labels[#labels + 1] = string.format("%g×", value)
+   end
+   return labels
+end
+
+local function makeSignedCurveRadii()
+   local radii = {}
+   for index = #CURVE_RADII_METRES, 1, -1 do
+      radii[#radii + 1] = -CURVE_RADII_METRES[index]
+   end
+   radii[#radii + 1] = 0
+   for _, radius in ipairs(CURVE_RADII_METRES) do
+      radii[#radii + 1] = radius
+   end
+   return radii
+end
+
+local function makeSignedCurveRadiusLabels(radii)
+   local labels = {}
+   for index, radius in ipairs(radii) do
+      labels[index] = radius == 0 and
+      "0 (" .. _("apasz_zigzag_straight") .. ")" or
+      string.format("%+d m", radius)
    end
    return labels
 end
@@ -126,6 +149,7 @@ local function makeDescription()
 end
 
 local function makeParams(legacyTracks)
+   local signedCurveRadii = makeSignedCurveRadii()
    local params = {
       {
          key = "tracks",
@@ -151,6 +175,27 @@ local function makeParams(legacyTracks)
          uiType = "Slider",
       },
    }
+   local curveParams = {
+      {
+         key = "signedStartCurveRadiusMetres",
+         name = _("apasz_zigzag_start_curve_radius"),
+      },
+      {
+         key = "signedEndCurveRadiusMetres",
+         name = _("apasz_zigzag_end_curve_radius"),
+      },
+   }
+   local curveRadiusLabels = makeSignedCurveRadiusLabels(signedCurveRadii)
+   local straightCurveIndex = requireValueIndex(signedCurveRadii, 0)
+   local curveRadiusTooltip = _("apasz_zigzag_curve_radius_tooltip")
+   for _, param in ipairs(curveParams) do
+      param.tooltip = curveRadiusTooltip
+      param.values = curveRadiusLabels
+      param.numbers = signedCurveRadii
+      param.defaultIndex = straightCurveIndex
+      param.uiType = "Slider"
+      params[#params + 1] = param
+   end
    if legacyTracks then
       local trackParams = {
          makeDefaultTrackTypeParam(false),
@@ -239,6 +284,8 @@ local function makeConstruction()
             legacyLengthsMetres = LEGACY_LENGTHS_METRES,
             trackCounts = TRACK_COUNTS,
             trackSpacingsMetres = TRACK_SPACINGS_METRES,
+            curveRadiiMetres = CURVE_RADII_METRES,
+            trackMinimumRadiiMetres = {},
             catchmentRadiiMetres = CATCHMENT_RADII_METRES,
             passengerCapacityMultipliers = PASSENGER_CAPACITY_MULTIPLIERS,
             defaultLengthMetres = DEFAULT_LENGTH_METRES,

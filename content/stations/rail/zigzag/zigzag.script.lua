@@ -1,4 +1,10 @@
-local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local math = _tl_compat and _tl_compat.math or math; local lane_util = ug_require("::/scripts/construction/laneutil.lua")
+local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local math = _tl_compat and _tl_compat.math or math; local string = _tl_compat and _tl_compat.string or string; local lane_util = ug_require("::/scripts/construction/laneutil.lua")
+local street_util = ug_require(
+"::/scripts/construction/street_util_serialized.tl")
+
+local validationMetadata = ug_require(
+"apasz_zigzag::/zigzag/validation_metadata.lua")
+
 local param_util = ug_require("::/scripts/construction/param_util.tl")
 local trackSelection = ug_require(
 "apasz_zigzag::/zigzag/track_selection.lua")
@@ -10,12 +16,8 @@ local logger = logging.new("Zigzag Station", false)
 
 local requireCatenaryEnabled = trackSelection.catenaryEnabled
 local SNAP_ANGLE_DEGREES = 60
-local NODES_PER_TRACK = 8
-local NEGATIVE_SNAP_NODE_OFFSET = 0
-local PASSENGER_TERMINAL_NODE_OFFSET = 1
-local NON_LOADING_TERMINAL_NODE_OFFSET = 3
-local CARGO_TERMINAL_NODE_OFFSET = 5
-local POSITIVE_SNAP_NODE_OFFSET = 7
+local MAX_SEGMENT_TURN_RADIANS = math.rad(10)
+local MAX_END_TURN_RADIANS = math.pi / 2
 local TERMINAL_NODE_SEPARATION_METRES = 1
 local STATION_TAG = 1
 local NON_LOADING_LANE_EDGE_INDEX = 0
@@ -28,6 +30,29 @@ local SERVICE_LANE_OFFSET_METRES = 0.5
 local ACCESS_LANE_WIDTH_METRES = 1
 local ACCESS_EXTENSION_METRES = 10
 local PASSENGER_CAPACITY_PER_METRE = 1.7
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -465,81 +490,228 @@ local function getTrackOffsetMetres(
    return (trackIndex - (trackCount + 1) / 2) * trackSpacingMetres
 end
 
-local function addStraightTrackEdge(
-   edges,
-   trackOffsetMetres,
-   firstLongitudinalOffsetMetres,
-   secondLongitudinalOffsetMetres)
+local function requireEndCurvature(
+   captureParams,
+   signedRadius,
+   minimumRadius,
+   endName,
+   validationErrors)
 
-   local tangent = {
+   if signedRadius == 0 then
+      return 0
+   end
+   local radius = requireAllowedValue(
+   captureParams.curveRadiiMetres,
+   signedRadius < 0 and -signedRadius or signedRadius,
+   endName)
+
+   if radius < minimumRadius then
+      validationErrors[#validationErrors + 1] = endName .. ": " .. string.format(
+      _("apasz_zigzag_curve_radius_too_small"),
+      radius,
+      math.ceil(minimumRadius))
+
+   end
+   return -1 / signedRadius
+end
+
+local function makeCurveGeometry(
+   captureParams,
+   params,
+   length,
+   trackCount,
+   trackSpacingMetres,
+   trackType)
+
+   local startRadius = params.signedStartCurveRadiusMetres or 0
+   local endRadius = params.signedEndCurveRadiusMetres or 0
+   local minimumRadius = 0
+   if startRadius ~= 0 or endRadius ~= 0 then
+      local minimumTrackRadius = captureParams.trackMinimumRadiiMetres[trackType]
+      if minimumTrackRadius == nil then
+         error("Zigzag Station has no minimum-radius data for track " .. trackType)
+      end
+      local halfWidth = (trackCount - 1) * trackSpacingMetres / 2
+
+      minimumRadius = math.max(
+      minimumTrackRadius + halfWidth,
+      (length / 2) / MAX_END_TURN_RADIANS,
+      math.floor(halfWidth + ACCESS_EXTENSION_METRES) + 1)
+
+   end
+   local validationErrors = {}
+   return {
+      startCurvaturePerMetre = requireEndCurvature(
+      captureParams, startRadius, minimumRadius, _("apasz_zigzag_start_curve_radius"),
+      validationErrors),
+
+      endCurvaturePerMetre = requireEndCurvature(
+      captureParams, endRadius, minimumRadius, _("apasz_zigzag_end_curve_radius"),
+      validationErrors),
+
+      lengthMetres = length,
+   }, validationErrors
+end
+
+local function curvatureAt(curve, longitudinalMetres)
+   if longitudinalMetres < 0 then
+      return curve.startCurvaturePerMetre
+   end
+   return curve.endCurvaturePerMetre
+end
+
+local function longitudinalScale(curvaturePerMetre, offsetMetres)
+   return 1 + curvaturePerMetre * offsetMetres
+end
+
+local function curvePosition(
+   curve,
+   offsetMetres,
+   longitudinalMetres)
+
+   local curvature = curvatureAt(curve, longitudinalMetres)
+   if curvature == 0 then
+      return { offsetMetres, longitudinalMetres, 0 }
+   end
+   local angle = curvature * longitudinalMetres
+
+   local lateral = -2 * math.sin(angle / 2) ^ 2 / curvature
+   return {
+      lateral + offsetMetres * math.cos(angle),
+      math.sin(angle) / curvature + offsetMetres * math.sin(angle),
       0,
-      secondLongitudinalOffsetMetres - firstLongitudinalOffsetMetres,
-      0,
-   }
-   edges[#edges + 1] = {
-      { trackOffsetMetres, firstLongitudinalOffsetMetres, 0 },
-      tangent,
-   }
-   edges[#edges + 1] = {
-      { trackOffsetMetres, secondLongitudinalOffsetMetres, 0 },
-      tangent,
    }
 end
 
-local function makeTrackEdgeList(
-   length,
+local function addCurveNodes(
+   nodes,
+   curve,
+   trackOffsetMetres,
+   firstLongitudinalOffsetMetres,
+   secondLongitudinalOffsetMetres,
+   widthMetres)
+
+   if firstLongitudinalOffsetMetres < 0 and secondLongitudinalOffsetMetres > 0 then
+      addCurveNodes(nodes, curve, trackOffsetMetres, firstLongitudinalOffsetMetres, 0, widthMetres)
+      addCurveNodes(nodes, curve, trackOffsetMetres, 0, secondLongitudinalOffsetMetres, widthMetres)
+      return
+   end
+   local curvature = curvatureAt(
+   curve, (firstLongitudinalOffsetMetres + secondLongitudinalOffsetMetres) / 2)
+
+   local span = secondLongitudinalOffsetMetres - firstLongitudinalOffsetMetres
+   if curvature == 0 then
+      local tangent = { 0, span, 0 }
+      nodes[#nodes + 1] = { { trackOffsetMetres, firstLongitudinalOffsetMetres, 0 }, tangent, widthMetres }
+      nodes[#nodes + 1] = { { trackOffsetMetres, secondLongitudinalOffsetMetres, 0 }, tangent, widthMetres }
+      return
+   end
+   local segmentCount = math.max(1, math.ceil(
+   math.abs(curvature * span) / MAX_SEGMENT_TURN_RADIANS))
+
+   for segmentIndex = 1, segmentCount do
+      local first = firstLongitudinalOffsetMetres + span * (segmentIndex - 1) / segmentCount
+      local last = secondLongitudinalOffsetMetres
+      if segmentIndex < segmentCount then
+         last = firstLongitudinalOffsetMetres + span * segmentIndex / segmentCount
+      end
+      local firstPosition = curvePosition(curve, trackOffsetMetres, first)
+      local lastPosition = curvePosition(curve, trackOffsetMetres, last)
+      local deltaX = lastPosition[1] - firstPosition[1]
+      local deltaY = lastPosition[2] - firstPosition[2]
+      local tangentLength = street_util.calcScale(
+      math.sqrt(deltaX * deltaX + deltaY * deltaY),
+      math.abs(curvature * (last - first)))
+
+      local firstAngle = curvature * first
+      local lastAngle = curvature * last
+      nodes[#nodes + 1] = {
+         firstPosition,
+         { -math.sin(firstAngle) * tangentLength, math.cos(firstAngle) * tangentLength, 0 },
+         widthMetres,
+      }
+      nodes[#nodes + 1] = {
+         lastPosition,
+         { -math.sin(lastAngle) * tangentLength, math.cos(lastAngle) * tangentLength, 0 },
+         widthMetres,
+      }
+   end
+end
+
+local function makeTrackLayout(
+   curve,
    trackType,
    trackCount,
    trackSpacingMetres)
 
-   local halfLength = length / 2
-   local halfTerminalNodeSeparationMetres = TERMINAL_NODE_SEPARATION_METRES / 2
+   local halfLength = curve.lengthMetres / 2
    local edges = {}
    local snapNodes = {}
+   local tracks = {}
    for trackIndex = 1, trackCount do
       local trackOffsetMetres = getTrackOffsetMetres(
       trackIndex,
       trackCount,
       trackSpacingMetres)
 
-      local firstNodeIndex = (trackIndex - 1) * NODES_PER_TRACK
-      addStraightTrackEdge(
+      local startScale = longitudinalScale(curve.startCurvaturePerMetre, trackOffsetMetres)
+      local endScale = longitudinalScale(curve.endCurvaturePerMetre, trackOffsetMetres)
+      local startStopOffsetMetres = -TERMINAL_NODE_SEPARATION_METRES / (2 * startScale)
+      local endStopOffsetMetres = TERMINAL_NODE_SEPARATION_METRES / (2 * endScale)
+      snapNodes[#snapNodes + 1] = #edges
+      addCurveNodes(
       edges,
+      curve,
       trackOffsetMetres,
       -halfLength,
-      -halfTerminalNodeSeparationMetres)
+      startStopOffsetMetres)
 
-      addStraightTrackEdge(
+      local passengerNodeIndex = #edges - 1
+      addCurveNodes(
       edges,
+      curve,
       trackOffsetMetres,
-      -halfTerminalNodeSeparationMetres,
+      startStopOffsetMetres,
       0)
 
-      addStraightTrackEdge(
+      local centreNodeIndex = #edges - 1
+      addCurveNodes(
       edges,
+      curve,
       trackOffsetMetres,
       0,
-      halfTerminalNodeSeparationMetres)
+      endStopOffsetMetres)
 
-      addStraightTrackEdge(
+      local cargoNodeIndex = #edges - 1
+      addCurveNodes(
       edges,
+      curve,
       trackOffsetMetres,
-      halfTerminalNodeSeparationMetres,
+      endStopOffsetMetres,
       halfLength)
 
-      snapNodes[#snapNodes + 1] = firstNodeIndex + NEGATIVE_SNAP_NODE_OFFSET
-      snapNodes[#snapNodes + 1] = firstNodeIndex + POSITIVE_SNAP_NODE_OFFSET
+      snapNodes[#snapNodes + 1] = #edges - 1
+      tracks[#tracks + 1] = {
+         offsetMetres = trackOffsetMetres,
+         lengthMetres = halfLength * (startScale + endScale),
+         passengerNodeIndex = passengerNodeIndex,
+         centreNodeIndex = centreNodeIndex,
+         cargoNodeIndex = cargoNodeIndex,
+      }
    end
    return {
-      type = "TRACK",
-      params = {
-         type = trackType,
+      tracks = tracks,
+      edgeList = {
+         type = "TRACK",
+         params = {
+            type = trackType,
+         },
+         edges = edges,
+         snapNodes = snapNodes,
+         tag2nodes = {},
+         alignTerrain = true,
+         maxNodeSnapAngle = SNAP_ANGLE_DEGREES,
       },
-      edges = edges,
-      snapNodes = snapNodes,
-      tag2nodes = {},
-      alignTerrain = true,
-      maxNodeSnapAngle = SNAP_ANGLE_DEGREES,
    }
 end
 
@@ -562,14 +734,15 @@ local function makeCombinedNonLoadingLane(
 end
 
 local function makeDisabledLoadingLane(
+   curve,
    laneOffsetMetres,
    transportMode)
 
    return lane_util.createLane(
    {
       {
-         { laneOffsetMetres, -0.5, 0 },
-         { laneOffsetMetres, 0.5, 0 },
+         curvePosition(curve, laneOffsetMetres, -0.5),
+         curvePosition(curve, laneOffsetMetres, 0.5),
       },
    },
    { transportMode },
@@ -580,55 +753,43 @@ local function makeDisabledLoadingLane(
 end
 
 local function makeServiceLane(
+   curve,
    laneOffsetMetres,
-   length,
    transportMode,
    widthMetres)
 
-   local halfLength = length / 2
-   return lane_util.createLane(
-   {
-      {
-         { laneOffsetMetres, -halfLength, 0 },
-         { laneOffsetMetres, 0, 0 },
-      },
-      {
-         { laneOffsetMetres, 0, 0 },
-         { laneOffsetMetres, halfLength, 0 },
-      },
-   },
-   { transportMode },
-   LANE_SPEED_LIMIT,
-   widthMetres,
-   false)
+   local halfLength = curve.lengthMetres / 2
+   local nodes = {}
+   addCurveNodes(nodes, curve, laneOffsetMetres, -halfLength, 0, widthMetres)
+   local centreNodeIndex = #nodes - 1
+   addCurveNodes(nodes, curve, laneOffsetMetres, 0, halfLength, widthMetres)
+   return {
 
+      nodes = nodes,
+      transportModes = { transportMode },
+      speedLimit = LANE_SPEED_LIMIT,
+      linkable = false,
+   }, centreNodeIndex
 end
 
 local function makePassengerAccessLane(
+   curve,
    firstTrackOffsetMetres,
    lastTrackOffsetMetres,
    passengerLaneOffsetsMetres,
    longitudinalOffsetMetres)
 
    local accessPoints = {
-      {
-         firstTrackOffsetMetres - ACCESS_EXTENSION_METRES,
-         longitudinalOffsetMetres,
-         0,
-      },
+      curvePosition(curve, firstTrackOffsetMetres - ACCESS_EXTENSION_METRES, longitudinalOffsetMetres),
    }
    for _, passengerLaneOffsetMetres in ipairs(passengerLaneOffsetsMetres) do
-      accessPoints[#accessPoints + 1] = {
-         passengerLaneOffsetMetres,
-         longitudinalOffsetMetres,
-         0,
-      }
+      accessPoints[#accessPoints + 1] = curvePosition(
+      curve, passengerLaneOffsetMetres, longitudinalOffsetMetres)
+
    end
-   accessPoints[#accessPoints + 1] = {
-      lastTrackOffsetMetres + ACCESS_EXTENSION_METRES,
-      longitudinalOffsetMetres,
-      0,
-   }
+   accessPoints[#accessPoints + 1] = curvePosition(
+   curve, lastTrackOffsetMetres + ACCESS_EXTENSION_METRES, longitudinalOffsetMetres)
+
 
    local accessSegments = {}
    for pointIndex = 1, #accessPoints - 1 do
@@ -665,6 +826,8 @@ end
 local function makeTerminal(
    tag,
    laneListIndex,
+   lane,
+   centreLaneNodeIndex,
    vehicleNodeIndex,
    passengers,
    cargo,
@@ -672,14 +835,15 @@ local function makeTerminal(
    cargoTransferSpeeds,
    transportModes)
 
+   local personEdges = {}
+   for edgeIndex = 0, math.floor(#lane.nodes / 2) - 1 do
+      personEdges[#personEdges + 1] = { laneListIndex, edgeIndex }
+   end
    return {
       tag = tag,
-      personEdges = {
-         { laneListIndex, 0 },
-         { laneListIndex, 1 },
-      },
+      personEdges = personEdges,
       personNodes = {
-         { laneListIndex, 1 },
+         { laneListIndex, centreLaneNodeIndex },
       },
       vehicleNode = { -1, vehicleNodeIndex },
       passengers = passengers,
@@ -726,9 +890,8 @@ local function passengerCapacity(length, multiplier)
 end
 
 local function makeStationSubconstruction(
-   length,
-   trackCount,
-   trackSpacingMetres,
+   curve,
+   tracks,
    passengerLoadingEnabled,
    cargoLoadingEnabled,
    passengerCapacityMultiplier,
@@ -739,20 +902,9 @@ local function makeStationSubconstruction(
    local terminals = {}
    local passengerLaneOffsetsMetres = {}
    local loadingEnabled = passengerLoadingEnabled or cargoLoadingEnabled
-   for trackIndex = 1, trackCount do
+   for trackIndex, track in ipairs(tracks) do
       local zeroBasedTrackIndex = trackIndex - 1
-      local trackOffsetMetres = getTrackOffsetMetres(
-      trackIndex,
-      trackCount,
-      trackSpacingMetres)
-
-      local firstTrackNodeIndex = zeroBasedTrackIndex * NODES_PER_TRACK
-      local passengerVehicleNodeIndex = firstTrackNodeIndex +
-      PASSENGER_TERMINAL_NODE_OFFSET
-      local nonLoadingVehicleNodeIndex = firstTrackNodeIndex +
-      NON_LOADING_TERMINAL_NODE_OFFSET
-      local cargoVehicleNodeIndex = firstTrackNodeIndex +
-      CARGO_TERMINAL_NODE_OFFSET
+      local trackOffsetMetres = track.offsetMetres
       local passengerLaneOffsetMetres = trackOffsetMetres -
       SERVICE_LANE_OFFSET_METRES
       local cargoLaneOffsetMetres = trackOffsetMetres +
@@ -764,31 +916,35 @@ local function makeStationSubconstruction(
          if passengerLoadingEnabled then
             passengerLaneOffsetsMetres[#passengerLaneOffsetsMetres + 1] =
 passengerLaneOffsetMetres
-            laneLists[#laneLists + 1] = makeServiceLane(
+            local lane, centreLaneNodeIndex = makeServiceLane(
+            curve,
             passengerLaneOffsetMetres,
-            length,
             "PERSON",
             PASSENGER_LANE_WIDTH_METRES)
 
+            laneLists[#laneLists + 1] = lane
             terminals[#terminals + 1] = makeTerminal(
             zeroBasedTrackIndex * 2,
             passengerLaneIndex,
-            passengerVehicleNodeIndex,
+            lane,
+            centreLaneNodeIndex,
+            track.passengerNodeIndex,
             true,
             false,
-            passengerCapacity(length, passengerCapacityMultiplier),
-            { makeCargoTransferSpeed("PASSENGERS", length) },
+            passengerCapacity(track.lengthMetres, passengerCapacityMultiplier),
+            { makeCargoTransferSpeed("PASSENGERS", track.lengthMetres) },
             transportModes)
 
          else
             laneLists[#laneLists + 1] = makeDisabledLoadingLane(
+            curve,
             passengerLaneOffsetMetres,
             "PERSON")
 
             terminals[#terminals + 1] = makeNonLoadingTerminal(
             zeroBasedTrackIndex * 2,
             passengerLaneIndex,
-            passengerVehicleNodeIndex,
+            track.passengerNodeIndex,
             true,
             false,
             transportModes)
@@ -797,31 +953,35 @@ passengerLaneOffsetMetres
 
          local cargoLaneIndex = #laneLists
          if cargoLoadingEnabled then
-            laneLists[#laneLists + 1] = makeServiceLane(
+            local lane, centreLaneNodeIndex = makeServiceLane(
+            curve,
             cargoLaneOffsetMetres,
-            length,
             "CARGO",
             CARGO_LANE_WIDTH_METRES)
 
+            laneLists[#laneLists + 1] = lane
             terminals[#terminals + 1] = makeTerminal(
             zeroBasedTrackIndex * 2 + 1,
             cargoLaneIndex,
-            cargoVehicleNodeIndex,
+            lane,
+            centreLaneNodeIndex,
+            track.cargoNodeIndex,
             false,
             true,
             0,
-            { makeCargoTransferSpeed("UNIVERSAL", length) },
+            { makeCargoTransferSpeed("UNIVERSAL", track.lengthMetres) },
             transportModes)
 
          else
             laneLists[#laneLists + 1] = makeDisabledLoadingLane(
+            curve,
             cargoLaneOffsetMetres,
             "CARGO")
 
             terminals[#terminals + 1] = makeNonLoadingTerminal(
             zeroBasedTrackIndex * 2 + 1,
             cargoLaneIndex,
-            cargoVehicleNodeIndex,
+            track.cargoNodeIndex,
             false,
             true,
             transportModes)
@@ -836,7 +996,7 @@ passengerLaneOffsetMetres
          terminals[#terminals + 1] = makeNonLoadingTerminal(
          zeroBasedTrackIndex,
          laneListIndex,
-         nonLoadingVehicleNodeIndex,
+         track.centreNodeIndex,
          true,
          true,
          transportModes)
@@ -846,21 +1006,14 @@ passengerLaneOffsetMetres
 
    local catchmentAreas = {}
    if loadingEnabled then
-      local halfLength = length / 2
-      local firstTrackOffsetMetres = getTrackOffsetMetres(
-      1,
-      trackCount,
-      trackSpacingMetres)
-
-      local lastTrackOffsetMetres = getTrackOffsetMetres(
-      trackCount,
-      trackCount,
-      trackSpacingMetres)
-
+      local halfLength = curve.lengthMetres / 2
+      local firstTrackOffsetMetres = tracks[1].offsetMetres
+      local lastTrackOffsetMetres = tracks[#tracks].offsetMetres
       local accessLaneOffsetsMetres = { -halfLength, 0, halfLength }
       for _, longitudinalOffsetMetres in ipairs(accessLaneOffsetsMetres) do
          if passengerLoadingEnabled then
             laneLists[#laneLists + 1] = makePassengerAccessLane(
+            curve,
             firstTrackOffsetMetres,
             lastTrackOffsetMetres,
             passengerLaneOffsetsMetres,
@@ -868,7 +1021,7 @@ passengerLaneOffsetMetres
 
          end
          catchmentAreas[#catchmentAreas + 1] = {
-            position = { 0.0, longitudinalOffsetMetres, 0.0 },
+            position = curvePosition(curve, 0, longitudinalOffsetMetres),
             radius = catchmentRadiusMetres,
          }
       end
@@ -915,6 +1068,10 @@ local function updateFn(captureParams, params)
    catenaryEnabled)
 
    local transportModes = makeTrackTransportModes(catenaryEnabled)
+   local curve, validationErrors = makeCurveGeometry(
+   captureParams, params, length, trackCount, trackSpacingMetres, trackType)
+
+   local layout = makeTrackLayout(curve, trackType, trackCount, trackSpacingMetres)
    local costs = calculateCosts(
    captureParams,
    params,
@@ -924,20 +1081,14 @@ local function updateFn(captureParams, params)
    passengerLoadingEnabled,
    cargoLoadingEnabled)
 
-   return {
+   local result = {
       edgeLists = {
-         makeTrackEdgeList(
-         length,
-         trackType,
-         trackCount,
-         trackSpacingMetres),
-
+         layout.edgeList,
       },
       subconstructions = {
          makeStationSubconstruction(
-         length,
-         trackCount,
-         trackSpacingMetres,
+         curve,
+         layout.tracks,
          passengerLoadingEnabled,
          cargoLoadingEnabled,
          passengerCapacityMultiplier,
@@ -948,6 +1099,12 @@ local function updateFn(captureParams, params)
       cost = costs.construction,
       maintenanceCost = costs.maintenance,
    }
+   if #validationErrors > 0 then
+
+      result.metadata = {}
+      validationMetadata.set(result.metadata, validationErrors)
+   end
+   return result
 end
 
 local function createTemplateFn(_captureParams, _params)
