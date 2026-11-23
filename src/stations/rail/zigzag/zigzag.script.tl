@@ -5,6 +5,9 @@ local street_util = ug_require(
 local validationMetadata = ug_require(
     "apasz_zigzag::/zigzag/validation_metadata.lua"
 ) as MetadataAccessor<ConstructionInstanceMetadata, {string}>
+local cargoStorage = ug_require(
+    "apasz_zigzag::/zigzag/cargo_storage.lua"
+) as ZigzagCargoStorage
 local param_util = ug_require "::/scripts/construction/param_util.tl" as ParamUtil
 local trackSelection = ug_require(
     "apasz_zigzag::/zigzag/track_selection.lua"
@@ -56,6 +59,8 @@ local record CapturedParams
     costMode: ZigzagCostMode
     trackCostProfiles: {string: ZigzagTrackCostProfile}
     platformCostProfiles: {ZigzagPlatformCostProfile}
+    cargoStorageCostProfiles: {ZigzagStorageType: ZigzagCostRate}
+    storageBayLayout: ZigzagStorageBayLayout
 end
 
 local record UpgradeCapturedParams
@@ -134,7 +139,7 @@ local record ZigzagStation
     catchmentAreas: {ZigzagCatchmentArea}
 end
 
-local record StationSubconstruction
+local record ZigzagSubconstruction
     tag: integer
     models: {ConstructionUtilSerialized.TransformedModel}
     colliders: {ColliderUtilSerialized.Collider}
@@ -142,12 +147,14 @@ local record StationSubconstruction
     groundFaces: {ConstructionUtilSerialized.GroundFace}
     laneLists: {ConstructionUtilSerialized.LaneList}
     emissionEmitter: {any}
-    station: ZigzagStation
+    station: ZigzagStation | nil
+    warehouse: table | nil
+    stocks: {ZigzagStorageStock} | nil
 end
 
 local record UpdateResult
     edgeLists: {TrackEdgeList}
-    subconstructions: {StationSubconstruction}
+    subconstructions: {ZigzagSubconstruction}
     cost: number
     maintenanceCost: number
     metadata: ConstructionInstanceMetadata | nil
@@ -208,7 +215,8 @@ local function calculateCosts(
     trackCount: integer,
     trackType: string,
     passengerLoadingEnabled: boolean,
-    cargoLoadingEnabled: boolean
+    cargoLoadingEnabled: boolean,
+    cargoStorageCapacity: integer
 ): ZigzagCostRate
     local mode = captureParams.costMode
     if mode == "NO_COST" then
@@ -231,6 +239,14 @@ local function calculateCosts(
     end
     local moduleCountAlongLength = length / captureParams.moduleLengthMetres
     addCost(total, trackModuleRate, moduleCountAlongLength * trackCount)
+    if cargoStorageCapacity > 0 then
+        local profile = cargoStorage.requireProfile(params.cargoStorageType)
+        local storageRate = captureParams.cargoStorageCostProfiles[profile.kind]
+        if storageRate == nil then
+            error("Zigzag Station has no cargo storage cost profile")
+        end
+        addCost(total, storageRate, cargoStorageCapacity)
+    end
 
     if mode == "STATION_COST"
         and (passengerLoadingEnabled or cargoLoadingEnabled)
@@ -889,6 +905,42 @@ local function passengerCapacity(length: number, multiplier: number): integer
     return math.max(math.floor(baseCapacity * multiplier + 0.5), 1)
 end
 
+local function makeSubconstruction(
+    tag: integer,
+    laneLists: {ConstructionUtilSerialized.LaneList}
+): ZigzagSubconstruction
+    return {
+        tag = tag,
+        models = {},
+        colliders = {},
+        terrainAlignmentLists = {},
+        groundFaces = {},
+        laneLists = laneLists,
+        emissionEmitter = {},
+    }
+end
+
+local function makeStorageSubconstruction(
+    bays: {ZigzagStorageBay},
+    profile: ZigzagStorageProfile,
+    pinnedCargo: {integer: ResName} | nil
+): ZigzagSubconstruction
+    local result = makeSubconstruction(cargoStorage.subconstructionTag, {})
+    -- A mesh-free model supplies warehouse bounds at the fixed station midpoint.
+    result.models[1] = {
+        id = "apasz_zigzag::/zigzag/cargo_storage.mdl",
+        transf = {
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        },
+    }
+    result.warehouse = {}
+    result.stocks = cargoStorage.makeStocks(bays, profile, pinnedCargo)
+    return result
+end
+
 local function makeStationSubconstruction(
     curve: CurveGeometry,
     tracks: {TrackGeometry},
@@ -897,7 +949,7 @@ local function makeStationSubconstruction(
     passengerCapacityMultiplier: number,
     catchmentRadiusMetres: integer,
     transportModes: {ConstructionUtilSerialized.TransportMode}
-): StationSubconstruction
+): ZigzagSubconstruction
     local laneLists: {ConstructionUtilSerialized.LaneList} = {}
     local terminals: {ZigzagTerminal} = {}
     local passengerLaneOffsetsMetres: {number} = {}
@@ -1026,30 +1078,23 @@ local function makeStationSubconstruction(
             }
         end
     end
-    return {
+    local result = makeSubconstruction(STATION_TAG, laneLists)
+    result.station = {
         tag = STATION_TAG,
-        models = {},
-        colliders = {},
-        terrainAlignmentLists = {},
-        groundFaces = {},
-        -- TpF3 requires every terminal to reference lanes of one unambiguous
-        -- service type, so loading mode uses separate passenger and cargo lanes.
-        laneLists = laneLists,
-        emissionEmitter = {},
-        station = {
-            tag = STATION_TAG,
-            terminals = terminals,
-            pool = {
-                edges = {},
-                capacity = 0,
-            },
-            catchmentAreas = catchmentAreas,
+        terminals = terminals,
+        pool = {
+            edges = {},
+            capacity = 0,
         },
+        catchmentAreas = catchmentAreas,
     }
+    return result
 end
 
 local function updateFn(captureParams: CapturedParams, params: ConstructionParams): UpdateResult
     local length = requireLength(captureParams, params)
+    local cargoStorageCapacity = cargoStorage.requireCapacity(params.cargoStorageCapacity)
+    local storageProfile = cargoStorage.requireProfile(params.cargoStorageType)
     local trackCount = requireTrackCount(captureParams, params)
     local trackSpacingMetres = requireTrackSpacingMetres(captureParams, params)
     local passengerLoadingEnabled, cargoLoadingEnabled = requireLoadingModes(
@@ -1079,7 +1124,8 @@ local function updateFn(captureParams: CapturedParams, params: ConstructionParam
         trackCount,
         trackType,
         passengerLoadingEnabled,
-        cargoLoadingEnabled
+        cargoLoadingEnabled,
+        cargoStorageCapacity
     )
     local result: UpdateResult = {
         edgeLists = {
@@ -1103,6 +1149,17 @@ local function updateFn(captureParams: CapturedParams, params: ConstructionParam
         -- Builder events display these as normal build errors, without Lua exceptions.
         result.metadata = {} as ConstructionInstanceMetadata
         validationMetadata.set(result.metadata, validationErrors)
+    end
+    if cargoStorageCapacity > 0 then
+        local bays = cargoStorage.makeBays(cargoStorageCapacity, params.cargoStorageType, captureParams.storageBayLayout)
+        result.subconstructions[#result.subconstructions + 1] = makeStorageSubconstruction(
+            bays, storageProfile, params.tagToCargoType
+        )
+        if result.metadata == nil then
+            result.metadata = {} as ConstructionInstanceMetadata
+        end
+        cargoStorage.metadata.set(result.metadata, cargoStorageCapacity)
+        cargoStorage.baysMetadata.set(result.metadata, bays)
     end
     return result
 end

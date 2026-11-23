@@ -1,0 +1,24 @@
+function data()
+    local identity = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    }
+    return {
+        boundingInfo = {
+            bbMin = { -0.1, -0.1, -0.1 },
+            bbMax = { 0.1, 0.1, 0.1 },
+        },
+        collider = { type = "NONE", params = {}, transf = identity },
+        lods = {
+            {
+                node = { name = "RootNode", children = {}, transf = identity },
+                visibleFrom = 0,
+                visibleTo = 100,
+            },
+        },
+        metadata = {},
+        version = 2,
+    }
+end

@@ -7,9 +7,14 @@ local logging = ug_require(
 local trackSelection = ug_require(
 "apasz_zigzag::/zigzag/track_selection.lua")
 
+local cargoStorage = ug_require(
+"apasz_zigzag::/zigzag/cargo_storage.lua")
+
 
 local COST_MODE_PARAM_KEY = "apasz_zigzag_costs_enabled"
 local DEFAULT_COST_MODE_INDEX = 3
+local STORAGE_LAYOUT_PARAM_KEY = "apasz_zigzag_storage_bay_layout"
+local DEFAULT_STORAGE_LAYOUT_INDEX = 1
 local MAX_CAPTURE_PARAM_DEPTH = 16
 local ZIGZAG_CONSTRUCTION_PATH = ug_require(
 "apasz_zigzag::/zigzag/construction_path.lua")
@@ -26,6 +31,12 @@ local COST_MODES = {
    "MODULE_COST",
    "STATION_COST",
 }
+
+
+
+
+
+
 
 
 
@@ -146,20 +157,32 @@ local function requireCaptureParams(
    return matches[1]
 end
 
-local function costMode(allModParams)
-   local selectedIndex = DEFAULT_COST_MODE_INDEX
+local function modParam(allModParams, key, defaultIndex)
    if allModParams ~= nil then
-      local modParams = (allModParams)[getCurrentModId()]
-      if modParams ~= nil and modParams[COST_MODE_PARAM_KEY] ~= nil then
-         selectedIndex = modParams[COST_MODE_PARAM_KEY]
+      local params = (allModParams)[getCurrentModId()]
+      if params ~= nil and params[key] ~= nil then
+         return params[key]
       end
    end
+   return defaultIndex
+end
 
-   local selectedMode = COST_MODES[selectedIndex]
-   if selectedMode == nil then
-      return logger.fail("invalid cost mode parameter " .. tostring(selectedIndex))
+local function costMode(allModParams)
+   local index = modParam(allModParams, COST_MODE_PARAM_KEY, DEFAULT_COST_MODE_INDEX)
+   local mode = COST_MODES[index]
+   if mode == nil then
+      return logger.fail("invalid cost mode parameter " .. tostring(index))
    end
-   return selectedMode
+   return mode
+end
+
+local function storageLayout(allModParams)
+   local index = modParam(allModParams, STORAGE_LAYOUT_PARAM_KEY, DEFAULT_STORAGE_LAYOUT_INDEX)
+   local layout = cargoStorage.bayLayouts[index]
+   if layout == nil then
+      return logger.fail("invalid storage bay layout parameter " .. tostring(index))
+   end
+   return layout
 end
 
 local function isFiniteNonNegativeNumber(value)
@@ -282,9 +305,20 @@ local function generatedTrackModuleName(trackTemplateName)
    return "::/trainstation_" .. trackTemplateName:gsub("::", "__")
 end
 
-local function trackMenuOrder(template)
+local function trackMenuCategories()
+   local categories = {}
+   for _, id in ipairs(api.res.genericRep.getAllOfType("menu_category")) do
+      local category = api.res.genericRep.get(id).data
+      if category.menu == "TRACKS" then
+         categories[category.category] = true
+      end
+   end
+   return categories
+end
+
+local function trackMenuOrder(template, trackCategories)
    for _, category in ipairs(template.menuCategory.categories) do
-      if category.category == "tracks" then
+      if trackCategories[category.category] then
          return category.order
       end
    end
@@ -299,6 +333,7 @@ local function collectTrackCatalog(
    local profiles = {}
    local choices = {}
    local minimumRadiiMetres = {}
+   local trackCategories = trackMenuCategories()
 
    for templateId, resourceName in pairs(api.res.streetTemplateRep.getAll(true)) do
       local template = api.res.streetTemplateRep.get(templateId)
@@ -344,7 +379,7 @@ local function collectTrackCatalog(
             end
             profiles[resourceName] = profile
          end
-         local order = trackMenuOrder(template)
+         local order = trackMenuOrder(template, trackCategories)
          if order ~= nil and
             api.res.streetTemplateRep.isVisible(templateId) then
 
@@ -484,6 +519,7 @@ local function costBounds(
    mode,
    catalog,
    platformProfiles,
+   storageRate,
    constructionScale,
    maintenanceScale,
    captureParams)
@@ -559,6 +595,11 @@ local function costBounds(
    local maximumMaintenance = maximumModules *
    maximumRate.maintenance *
    maintenanceScale
+   local maximumStorageCapacity = cargoStorage.capacities[#cargoStorage.capacities]
+   maximumConstruction = maximumConstruction +
+   maximumStorageCapacity * storageRate.construction * constructionScale
+   maximumMaintenance = maximumMaintenance +
+   maximumStorageCapacity * storageRate.maintenance * maintenanceScale
    if mode == "STATION_COST" then
       local platformRate = maximumPlatformRate(platformProfiles)
       local platformRows = math.floor(maximumTrackCount / 2) + 1
@@ -659,7 +700,7 @@ local function configureTemplate(
    catalog,
    bounds)
 
-   local templateName = constructionName:gsub("%.con$", ".metacon")
+   local templateName = (getCurrentModId() .. ZIGZAG_CONSTRUCTION_PATH):gsub("%.con$", ".metacon")
    local templateId = api.res.metaConstructionRep.find(templateName)
    if templateId == -1 then
       logger.fail("missing construction template " .. templateName)
@@ -709,15 +750,16 @@ local function configureTemplate(
    storeTemplatePeriods(templateName, templateId, template, trackParams)
 end
 
-local function configureConstruction(
+local function captureConstructionCosts(
+   constructionName,
    mode,
-   baseConfig)
+   catalog,
+   platformProfiles,
+   storageProfiles)
 
-   local constructionName = getCurrentModId() .. ZIGZAG_CONSTRUCTION_PATH
    local constructionId = api.res.constructionRep.find(constructionName)
    if constructionId == -1 then
-      logger.fail("missing construction " .. constructionName)
-      return
+      return logger.fail("missing construction " .. constructionName)
    end
    local construction = api.res.constructionRep.get(constructionId)
    local existingUpdateScript = requireConstructionUpdateScript(
@@ -729,6 +771,23 @@ local function configureConstruction(
    existingUpdateScript.fileName,
    "update",
    isCostCaptureParams)
+
+   params.costMode = mode
+   params.trackCostProfiles = catalog.profiles
+   params.platformCostProfiles = platformProfiles
+   params.trackMinimumRadiiMetres = catalog.minimumRadiiMetres
+   params.cargoStorageCostProfiles = storageProfiles
+   local updateScript = api.type.ScriptRef.new()
+   updateScript.fileName = existingUpdateScript.fileName
+   updateScript.params = rootParams
+   construction.updateScript = updateScript
+   return params
+end
+
+local function configureConstruction(
+   mode,
+   baseConfig,
+   bayLayout)
 
    local constructionScale = infrastructureScale(
    baseConfig,
@@ -746,20 +805,33 @@ local function configureConstruction(
       platformProfiles = collectPlatformCostProfiles(constructionScale)
    end
 
-   params.costMode = mode
-   params.trackCostProfiles = catalog.profiles
-   params.platformCostProfiles = platformProfiles
-   params.trackMinimumRadiiMetres = catalog.minimumRadiiMetres
+   local storageProfiles = {}
+   local storageRate = { construction = 0, maintenance = 0 }
+   if mode == "MODULE_COST" or mode == "STATION_COST" then
+      for _, profile in ipairs(cargoStorage.profiles) do
+         local moduleRate = moduleCostRate(
+         requireModule(profile.moduleName), profile.moduleName, constructionScale)
 
-   local updateScript = api.type.ScriptRef.new()
-   updateScript.fileName = existingUpdateScript.fileName
-   updateScript.params = rootParams
-   construction.updateScript = updateScript
+         local rate = {
+            construction = moduleRate.construction / cargoStorage.moduleCapacity,
+            maintenance = moduleRate.maintenance / cargoStorage.moduleCapacity,
+         }
+         storageProfiles[profile.kind] = rate
+         storageRate.construction = math.max(storageRate.construction, rate.construction)
+         storageRate.maintenance = math.max(storageRate.maintenance, rate.maintenance)
+      end
+   end
+   local baseName = getCurrentModId() .. ZIGZAG_CONSTRUCTION_PATH
+   local singleBayName = baseName:gsub("%.con$", "_single_bay.con")
+   local params = captureConstructionCosts(baseName, mode, catalog, platformProfiles, storageProfiles)
+   captureConstructionCosts(singleBayName, mode, catalog, platformProfiles, storageProfiles)
+   local constructionName = bayLayout == "SINGLE_BAY" and singleBayName or baseName
 
    local bounds = costBounds(
    mode,
    catalog,
    platformProfiles,
+   storageRate,
    constructionScale,
    maintenanceScale,
    params)
@@ -776,7 +848,7 @@ function data()
          allModParams,
          baseConfig)
 
-         configureConstruction(costMode(allModParams), baseConfig)
+         configureConstruction(costMode(allModParams), baseConfig, storageLayout(allModParams))
       end,
    }
 end

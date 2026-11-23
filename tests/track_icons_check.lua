@@ -299,36 +299,44 @@ end
 
 do
     _G._ = function(value) return value end
+    dependencies["::/scripts/metadata_util.tl"] = { constructionInstance = { register = function(key)
+        return {
+            set = function(container, value) container[key] = value end,
+            get = function(container) return container and container[key] end,
+        }
+    end } }
+    dependencies["apasz_zigzag::/zigzag/cargo_storage.lua"] = assert(loadfile("content/zigzag/cargo_storage.lua"))()
     dependencies["::/scripts/construction/param_util.tl"] = {}
     local stationDefinition = assert(loadfile("content/zigzag/station_definition.lua"))()
     local template = stationDefinition.makeTemplate()
     local sliders = 0
     for _, param in ipairs(template.params) do
-        if param.key == "signedStartCurveRadiusMetres" or param.key == "signedEndCurveRadiusMetres" then
+        if param.key == "signedStartCurveRadiusMetres" or param.key == "signedEndCurveRadiusMetres"
+            or param.key == "cargoStorageCapacity" then
             sliders = sliders + 1
             local nativeParam = copy(param)
             nativeParam.uiType = api.type["enum"].ScriptParamType.Slider
-            for index, radius in ipairs(param.numbers) do
+            for index, value in ipairs(param.numbers) do
                 local selected
                 local recipe = buildSelector(uiParams(nativeParam, {
-                    currentValue = radius,
+                    currentValue = value,
                     onValueChange = function(value) selected = value end,
                 }))
-                assert(recipe.kind == "ScriptParamSliderAndText", "curve controls use the native slider")
+                assert(recipe.kind == "ScriptParamSliderAndText", "numeric controls use the native slider")
                 local layout = recipe.body(recipe.params)
                 local slider, text = table.unpack(layout.params.children)
                 assert(slider.params.value == index and slider.params.min == 1 and slider.params.max == #param.numbers,
-                    "signed radii select the correct native slider position")
-                assert(text.extra[1].initialValue == radius, "the native label receives the signed radius")
-                assert(text.extra[1].formatValueFn(radius) == param.values[index], "the native label uses the radius text")
-                for targetIndex, targetRadius in ipairs(param.numbers) do
+                    "numeric values select the correct native slider position")
+                assert(text.extra[1].initialValue == value, "the native label receives the numeric value")
+                assert(text.extra[1].formatValueFn(value) == param.values[index], "the native label uses the control's value text")
+                for targetIndex, targetValue in ipairs(param.numbers) do
                     slider.params.onValueChange(targetIndex)
-                    assert(selected == targetRadius, "slider callbacks preserve negative, zero and positive radii")
+                    assert(selected == targetValue, "slider callbacks preserve negative, zero and positive values")
                 end
             end
         end
     end
-    assert(sliders == 2, "both independent end controls reach the native renderer")
+    assert(sliders == 3, "both end controls and shared storage reach the native renderer")
 end
 
 do

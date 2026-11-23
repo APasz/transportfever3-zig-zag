@@ -17,6 +17,17 @@
                 "apasz_zigzag_cost_mode_module",
                 "apasz_zigzag_cost_mode_station"
             ]
+        },
+        {
+            "defaultIndex": 0,
+            "key": "apasz_zigzag_storage_bay_layout",
+            "name": "apasz_zigzag_storage_bay_layout",
+            "tooltip": "apasz_zigzag_storage_bay_layout_tooltip",
+            "uiType": "ComboBox",
+            "values": [
+                "apasz_zigzag_storage_bay_layout_modules",
+                "apasz_zigzag_storage_bay_layout_single"
+            ]
         }
     ],
     "postRunScript": {
@@ -25,7 +36,7 @@
     "preRunScript": {
         "fileName": ""
     },
-    "revision": 7,
+    "revision": 8,
     "runScript": {
         "fileName": ""
     },

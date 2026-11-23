@@ -3,6 +3,9 @@ local trackSelection = ug_require(
 ) as ZigzagTrackSelection
 
 local param_util = ug_require "::/scripts/construction/param_util.tl" as ParamUtil
+local cargoStorage = ug_require(
+    "apasz_zigzag::/zigzag/cargo_storage.lua"
+) as ZigzagCargoStorage
 
 local LENGTHS_METRES: {integer} = {
     5, 10, 20, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 440,
@@ -255,10 +258,33 @@ local function makeParams(legacyTracks: boolean): {ConstructionScriptParam}
     for _, param in ipairs(loadingParams) do
         params[#params + 1] = param
     end
+    local storageTypes: {string} = {}
+    for _profileIndex, profile in ipairs(cargoStorage.profiles) do
+        storageTypes[#storageTypes + 1] = _(profile.labelKey)
+    end
+    params[#params + 1] = {
+        key = "cargoStorageType",
+        name = _("apasz_zigzag_storage_type"),
+        tooltip = _("apasz_zigzag_storage_type_tooltip"),
+        values = storageTypes,
+        defaultIndex = 1,
+        uiType = "ComboBox",
+    }
+    local storageLabels = makeNumberLabels(cargoStorage.capacities, "")
+    storageLabels[1] = "0 (" .. _(OFF_KEY) .. ")"
+    params[#params + 1] = {
+        key = "cargoStorageCapacity",
+        name = _("apasz_zigzag_cargo_storage"),
+        tooltip = _("apasz_zigzag_cargo_storage_tooltip"),
+        values = storageLabels,
+        numbers = cargoStorage.capacities,
+        defaultIndex = 1,
+        uiType = "Slider",
+    }
     return params
 end
 
-local function makeConstruction(): table
+local function makeConstruction(bayLayout: ZigzagStorageBayLayout): table
     return {
         configureLayerScript = {
             fileName = "::/gui/construction/construction_desc_layers.script@configureDefaultLayerFn",
@@ -300,6 +326,8 @@ local function makeConstruction(): table
                 costMode = "MODULE_COST" as ZigzagCostMode,
                 trackCostProfiles = {},
                 platformCostProfiles = {},
+                cargoStorageCostProfiles = {},
+                storageBayLayout = bayLayout,
             },
         },
         upgradeScript = {

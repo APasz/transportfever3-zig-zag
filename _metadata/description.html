@@ -6,6 +6,7 @@
   <li>One to eight tracks, 5–440 metres long, with 3–20 metre spacing.</li>
   <li>Independent curve radii at each end, supporting straight sections, continuous curves, and S-curves.</li>
   <li>Independent passenger and cargo loading without visible platforms.</li>
+  <li>Optional shared transfer warehouse with up to 5,000 cargo units: Universal, Bulk, Flatbed, Goods or Liquid. Includes native stock and specialised cargo controls.</li>
   <li>Adjustable passenger capacity and 50–300 metre catchment radius.</li>
   <li>Select available vanilla and modded tracks, including electrified and third-rail variants; compatible with track upgrades.</li>
   <li>Four construction and maintenance cost modes.</li>
@@ -18,13 +19,24 @@
   <li><strong>Track Cost:</strong> the selected track's per-metre cost for every track.</li>
   <li>
     <strong>Module Cost:</strong> the equivalent vanilla track-module cost, scaled by length
-    (default).
+    plus selected warehouse storage at vanilla rates (default).
   </li>
   <li>
     <strong>Station Cost:</strong> Module Cost plus vanilla passenger and cargo platform modules
     for the enabled loading modes.
   </li>
 </ul>
+
+<p>
+  Cargo storage is off by default. All tracks share its capacity. Enable cargo loading for
+  Zigzag trains to use it; nearby cargo stations can also use it when their catchment reaches it.
+  Industries do not exchange cargo with the warehouse automatically. Universal storage keeps
+  delivery timers running; specialised bays pause timers and load faster,
+  holding one cargo type per bay. A mod setting selects 500-unit specialised bays or one bay
+  using the full capacity for newly built stations. Existing stations keep their layout.
+  Collect or discard enough cargo before changing warehouse type, reducing capacity or removing
+  a filled warehouse.
+</p>
 
 <p>
   Passenger and cargo loading are off by default. The station does not force a reversal. Trains reverse when the next leg of their route requires

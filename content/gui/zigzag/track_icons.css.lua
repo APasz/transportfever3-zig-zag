@@ -31,10 +31,6 @@ local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 th
 
 
 
-
-
-
-
 local stylesheetUtil = ug_require("::/gui/main/stylesheetutil.lua")
 local CONSTRUCTION_SIZES_PATH = "::/gui/construction/construction_sizes.lua"
 

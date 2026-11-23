@@ -5,6 +5,9 @@ local street_util = ug_require(
 local validationMetadata = ug_require(
 "apasz_zigzag::/zigzag/validation_metadata.lua")
 
+local cargoStorage = ug_require(
+"apasz_zigzag::/zigzag/cargo_storage.lua")
+
 local param_util = ug_require("::/scripts/construction/param_util.tl")
 local trackSelection = ug_require(
 "apasz_zigzag::/zigzag/track_selection.lua")
@@ -30,6 +33,10 @@ local SERVICE_LANE_OFFSET_METRES = 0.5
 local ACCESS_LANE_WIDTH_METRES = 1
 local ACCESS_EXTENSION_METRES = 10
 local PASSENGER_CAPACITY_PER_METRE = 1.7
+
+
+
+
 
 
 
@@ -208,7 +215,8 @@ local function calculateCosts(
    trackCount,
    trackType,
    passengerLoadingEnabled,
-   cargoLoadingEnabled)
+   cargoLoadingEnabled,
+   cargoStorageCapacity)
 
    local mode = captureParams.costMode
    if mode == "NO_COST" then
@@ -231,6 +239,14 @@ local function calculateCosts(
    end
    local moduleCountAlongLength = length / captureParams.moduleLengthMetres
    addCost(total, trackModuleRate, moduleCountAlongLength * trackCount)
+   if cargoStorageCapacity > 0 then
+      local profile = cargoStorage.requireProfile(params.cargoStorageType)
+      local storageRate = captureParams.cargoStorageCostProfiles[profile.kind]
+      if storageRate == nil then
+         error("Zigzag Station has no cargo storage cost profile")
+      end
+      addCost(total, storageRate, cargoStorageCapacity)
+   end
 
    if mode == "STATION_COST" and
       (passengerLoadingEnabled or cargoLoadingEnabled) then
@@ -889,6 +905,42 @@ local function passengerCapacity(length, multiplier)
    return math.max(math.floor(baseCapacity * multiplier + 0.5), 1)
 end
 
+local function makeSubconstruction(
+   tag,
+   laneLists)
+
+   return {
+      tag = tag,
+      models = {},
+      colliders = {},
+      terrainAlignmentLists = {},
+      groundFaces = {},
+      laneLists = laneLists,
+      emissionEmitter = {},
+   }
+end
+
+local function makeStorageSubconstruction(
+   bays,
+   profile,
+   pinnedCargo)
+
+   local result = makeSubconstruction(cargoStorage.subconstructionTag, {})
+
+   result.models[1] = {
+      id = "apasz_zigzag::/zigzag/cargo_storage.mdl",
+      transf = {
+         1, 0, 0, 0,
+         0, 1, 0, 0,
+         0, 0, 1, 0,
+         0, 0, 0, 1,
+      },
+   }
+   result.warehouse = {}
+   result.stocks = cargoStorage.makeStocks(bays, profile, pinnedCargo)
+   return result
+end
+
 local function makeStationSubconstruction(
    curve,
    tracks,
@@ -1026,30 +1078,23 @@ passengerLaneOffsetMetres
          }
       end
    end
-   return {
+   local result = makeSubconstruction(STATION_TAG, laneLists)
+   result.station = {
       tag = STATION_TAG,
-      models = {},
-      colliders = {},
-      terrainAlignmentLists = {},
-      groundFaces = {},
-
-
-      laneLists = laneLists,
-      emissionEmitter = {},
-      station = {
-         tag = STATION_TAG,
-         terminals = terminals,
-         pool = {
-            edges = {},
-            capacity = 0,
-         },
-         catchmentAreas = catchmentAreas,
+      terminals = terminals,
+      pool = {
+         edges = {},
+         capacity = 0,
       },
+      catchmentAreas = catchmentAreas,
    }
+   return result
 end
 
 local function updateFn(captureParams, params)
    local length = requireLength(captureParams, params)
+   local cargoStorageCapacity = cargoStorage.requireCapacity(params.cargoStorageCapacity)
+   local storageProfile = cargoStorage.requireProfile(params.cargoStorageType)
    local trackCount = requireTrackCount(captureParams, params)
    local trackSpacingMetres = requireTrackSpacingMetres(captureParams, params)
    local passengerLoadingEnabled, cargoLoadingEnabled = requireLoadingModes(
@@ -1079,7 +1124,8 @@ local function updateFn(captureParams, params)
    trackCount,
    trackType,
    passengerLoadingEnabled,
-   cargoLoadingEnabled)
+   cargoLoadingEnabled,
+   cargoStorageCapacity)
 
    local result = {
       edgeLists = {
@@ -1103,6 +1149,17 @@ local function updateFn(captureParams, params)
 
       result.metadata = {}
       validationMetadata.set(result.metadata, validationErrors)
+   end
+   if cargoStorageCapacity > 0 then
+      local bays = cargoStorage.makeBays(cargoStorageCapacity, params.cargoStorageType, captureParams.storageBayLayout)
+      result.subconstructions[#result.subconstructions + 1] = makeStorageSubconstruction(
+      bays, storageProfile, params.tagToCargoType)
+
+      if result.metadata == nil then
+         result.metadata = {}
+      end
+      cargoStorage.metadata.set(result.metadata, cargoStorageCapacity)
+      cargoStorage.baysMetadata.set(result.metadata, bays)
    end
    return result
 end

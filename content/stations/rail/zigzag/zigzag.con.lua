@@ -3,5 +3,5 @@ local definition = ug_require(
 
 
 function data()
-   return definition.makeConstruction()
+   return definition.makeConstruction("MODULE_BAYS")
 end

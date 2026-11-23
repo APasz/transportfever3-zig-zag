@@ -3,5 +3,5 @@ local definition = ug_require(
 ) as ZigzagStationDefinition
 
 function data(): any
-    return definition.makeConstruction()
+    return definition.makeConstruction("MODULE_BAYS")
 end

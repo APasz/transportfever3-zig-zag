@@ -23,10 +23,6 @@ local record StylesheetUtil
     makeAdder: function({StyleRule}): function(string, TrackStyle)
 end
 
-local record ConstructionSizes
-    ParamsWindowWidth: number
-end
-
 local type LuaChunk = function(): any
 
 local record FileResolver

@@ -1,9 +1,11 @@
-local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local SELECT_EVENT = "select"
+local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local pairs = _tl_compat and _tl_compat.pairs or pairs; local SELECT_EVENT = "select"
 local PROPOSAL_CREATE_EVENT = "builder.proposalCreate"
 local PROPOSAL_PREPARE_EVENT = "builder.proposalPrepareForApply"
 local validationMetadata = ug_require(
 "apasz_zigzag::/zigzag/validation_metadata.lua")
 
+local cargoStorage = ug_require(
+"apasz_zigzag::/zigzag/cargo_storage.lua")
 
 
 
@@ -16,6 +18,16 @@ local validationMetadata = ug_require(
 
 
 
+
+
+local function addValidationError(
+   errors,
+   message)
+
+   local result = errors or {}
+   result[message] = true
+   return result
+end
 
 local function validateProposal(proposal)
    local errors = nil
@@ -24,11 +36,40 @@ local function validateProposal(proposal)
       local messages = validationMetadata.get(added.construction.persistentMetadata)
       if messages ~= nil then
          for _, message in ipairs(messages) do
-            local currentErrors = errors or {}
-            currentErrors[message] = true
-            errors = currentErrors
+            errors = addValidationError(errors, message)
          end
       end
+   end
+   local checked = {}
+   local function validateStorageRemoval(entity)
+      if checked[entity] then
+         return
+      end
+      checked[entity] = true
+      local construction = api.engine.getComponent(
+      entity, api.type.ComponentType.CONSTRUCTION)
+
+      if construction == nil then
+         return
+      end
+      local previousCapacity = cargoStorage.metadata.get(construction.persistentMetadata)
+      if previousCapacity == nil or previousCapacity == 0 then
+         return
+      end
+      local replacementMetadata = nil
+      local replacementIndex = proposal.old2new[entity]
+      if replacementIndex ~= nil then
+         replacementMetadata = proposal.toAdd_native:at(replacementIndex + 1).construction.persistentMetadata
+      end
+      for _, message in ipairs(cargoStorage.removalErrors(construction, replacementMetadata)) do
+         errors = addValidationError(errors, message)
+      end
+   end
+   for entity in pairs(proposal.old2new) do
+      validateStorageRemoval(entity)
+   end
+   for index = 1, proposal.toRemove_native:size() do
+      validateStorageRemoval(proposal.toRemove_native:at(index))
    end
    if errors == nil then
       return nil
