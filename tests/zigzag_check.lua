@@ -216,7 +216,7 @@ package.preload["::/scripts/construction/street_util_serialized.tl"] = function(
     }
 end
 
-for _, moduleName in ipairs({ "track_selection", "station_definition", "validation_metadata", "cargo_storage" }) do
+for _, moduleName in ipairs({ "track_selection", "station_definition", "validation_metadata", "cargo_storage", "logger", "has_station_window" }) do
     package.preload["apasz_zigzag::/zigzag/" .. moduleName .. ".lua"] = function()
         return assert(loadfile("content/zigzag/" .. moduleName .. ".lua"))()
     end
@@ -251,6 +251,26 @@ end
 
 _G.ug_require = function(resourceName)
     return require(resourceName)
+end
+
+do
+    local previousLog = _G.log
+    local messages = {}
+    _G.log = { verbose = function(message) messages[#messages + 1] = message end }
+    local logging = require("apasz_zigzag::/zigzag/logging.lua")
+    for _, enabled in ipairs({ false, true }) do
+        local logger = assert(loadfile("content/zigzag/logger.lua", "t", setmetatable({
+            ug_require = function(name)
+                if name == "apasz_zigzag::/zigzag/logging_config.lua" then return enabled end
+                assertEqual(name, "apasz_zigzag::/zigzag/logging.lua", "logger uses the shared logging module")
+                return logging
+            end,
+        }, { __index = _G })))()
+        logger.debug("debug setting check")
+        assertEqual(#messages, enabled and 1 or 0, "shared logger honours the mod debug setting")
+    end
+    assertEqual(messages[1], "[Zigzag Station] debug setting check", "shared logger identifies the mod")
+    _G.log = previousLog
 end
 
 _G._ = function(value)
@@ -682,6 +702,9 @@ do
         local ok, message = pcall(openWindow)
         assertEqual(ok, false, "invalid station window state is rejected")
         assert(tostring(message):find(expectedError, 1, true), tostring(message))
+        assert(tostring(message):find("[Zigzag Station] ERROR:", 1, true), "window errors use the shared logger")
+        assert(tostring(message):find("construction=101", 1, true)
+            or tostring(message):find("entity=101", 1, true), "window errors identify the selected construction")
         assertEqual(actionHelperCalls, 4, "invalid state never binds native actions")
     end
 
@@ -3332,6 +3355,7 @@ do
             },
             ["::/gui/entity_window/station_group/station_group_eow.script.tl"] = { StationGroupEowExtensionPoint = point },
             ["apasz_zigzag::/zigzag/cargo_storage.lua"] = storage,
+            ["apasz_zigzag::/zigzag/logger.lua"] = require("apasz_zigzag::/zigzag/logger.lua"),
         }
         local previousRequire = _G.ug_require
         _G.ug_require = function(name)

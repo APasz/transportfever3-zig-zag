@@ -58,6 +58,8 @@ Generate runtime Lua and run the regression tests with:
 ```sh
 tl gen -c -o content/mod.script.lua src/mod.script.tl
 tl gen -c -o content/zigzag/logging_config.lua src/zigzag/logging_config.tl
+tl gen -c -o content/zigzag/logger.lua src/zigzag/logger.tl
+tl gen -c -o content/zigzag/has_station_window.lua src/zigzag/has_station_window.tl
 tl gen -c -o content/zigzag/construction_path.lua src/zigzag/construction_path.tl
 tl gen -c -o content/zigzag/track_selection.lua src/zigzag/track_selection.tl
 tl gen -c -o content/zigzag/validation_metadata.lua src/zigzag/validation_metadata.tl
@@ -68,6 +70,7 @@ tl gen -c -o content/gui/zigzag/track_icons.res.lua src/gui/zigzag/track_icons.r
 tl gen -c -o content/gui/zigzag/track_icons.css.lua src/gui/zigzag/track_icons.css.tl
 tl gen -c -o content/gui/zigzag/cargo_storage.script.lua src/gui/zigzag/cargo_storage.script.tl
 tl gen -c -o content/gui/zigzag/cargo_storage.res.lua src/gui/zigzag/cargo_storage.res.tl
+tl gen -c -o content/gui/zigzag/station_window.res.lua src/gui/zigzag/station_window.res.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.con.lua src/stations/rail/zigzag/zigzag.con.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag_single_bay.con.lua src/stations/rail/zigzag/zigzag_single_bay.con.tl
 tl gen -c -o content/stations/rail/zigzag/zigzag.metacon.lua src/stations/rail/zigzag/zigzag.metacon.tl
@@ -99,7 +102,9 @@ User-facing text is defined in `strings.json`. Its translation keys are namespac
 with `apasz_zigzag_` to avoid collisions with other mods.
 
 Runtime logging uses the shared `_logging` module. Debug logging is disabled by default in
-`src/zigzag/logging_config.tl`.
+`src/zigzag/logging_config.tl`; every runtime logger uses it through `zigzag/logger.lua`.
+Recoverable compatibility fallbacks warn once per Lua context. The station-title workaround
+logs its first use, while station-window failures include the relevant entity or resource.
 
 The metaconstruction picker saves `streetTemplate` and the track's electric capability into
 the placed construction. Picker indices are transient; legacy `trackType` indices retain their
@@ -203,6 +208,13 @@ The selection game script must be loaded by reloading the save after updating th
 
 The window tests cover callback loading through `data()`, track-selection forwarding,
 generated construction names, native station content, and the construction rename target.
+The GUI bootstrap fills missing cargo classes in copied Zigzag terminal-list state, allowing
+the native title renderer to display universal cargo. This covers saved stations and mixed
+station groups without rebuilding them or changing other stations' state. Renderer wrappers
+are chained; unrelated registry entries release the discovery hook when it is still current.
+The native renderer check reproduces the missing-class crash, installs the fix through the
+game's bootstrap, and checks non-loading, passenger, combined and specialised titles alongside
+the UI plugins. It also checks mixed groups, colliding recipe names and argument identity.
 For in-game verification, check existing and newly placed stations, rename persistence after
 reloading, stopping lines on each terminal, and ordinary track selection.
 

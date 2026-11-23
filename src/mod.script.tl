@@ -1,9 +1,4 @@
-local debugLoggingEnabled = ug_require(
-    "apasz_zigzag::/zigzag/logging_config.lua"
-) as boolean
-local logging = ug_require(
-    "apasz_zigzag::/zigzag/logging.lua"
-) as ModLogging.Module
+local logger = ug_require "apasz_zigzag::/zigzag/logger.lua" as ModLogging.Logger
 local trackSelection = ug_require(
     "apasz_zigzag::/zigzag/track_selection.lua"
 ) as ZigzagTrackSelection
@@ -23,7 +18,6 @@ local PASSENGER_PLATFORM_PATH_PREFIX =
     "::/stations/rail/modular_station/platform_passenger_era_"
 local CARGO_PLATFORM_PATH_PREFIX =
     "::/stations/rail/modular_station/platform_cargo_era_"
-local logger = logging.new("Zigzag Station", debugLoggingEnabled)
 
 local COST_MODES: {ZigzagCostMode} = {
     "NO_COST",

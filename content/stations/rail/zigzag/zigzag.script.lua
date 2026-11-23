@@ -12,10 +12,7 @@ local param_util = ug_require("::/scripts/construction/param_util.tl")
 local trackSelection = ug_require(
 "apasz_zigzag::/zigzag/track_selection.lua")
 
-local logging = ug_require(
-"apasz_zigzag::/zigzag/logging.lua")
-
-local logger = logging.new("Zigzag Station", false)
+local logger = ug_require("apasz_zigzag::/zigzag/logger.lua")
 
 local requireCatenaryEnabled = trackSelection.catenaryEnabled
 local SNAP_ANGLE_DEGREES = 60

@@ -61,8 +61,14 @@ local dependencies = {
     ["/scripts/mathutil.lua"] = {},
     ["apasz_zigzag::/zigzag/track_selection.lua"] = selection,
     ["apasz_zigzag::/zigzag/logging.lua"] = assert(loadfile("content/zigzag/logging.lua"))(),
+    ["apasz_zigzag::/zigzag/logging_config.lua"] = assert(loadfile("content/zigzag/logging_config.lua"))(),
 }
-_G.ug_require = function(name) return assert(dependencies[name], name) end
+_G.ug_require = function(name)
+    local dependency = dependencies[name]
+    assert(dependency ~= nil, name)
+    return dependency
+end
+dependencies["apasz_zigzag::/zigzag/logger.lua"] = assert(loadfile("content/zigzag/logger.lua"))()
 _G.api = { type = { ["enum"] = { ScriptParamType = { ComboBox = 3, Button = 1, Slider = 2, IconButton = 4, CheckBox = 5 } } } }
 
 do

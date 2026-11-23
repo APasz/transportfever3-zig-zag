@@ -4,8 +4,7 @@ local constructionUtil = ug_require("::/gui/construction/construction_react_util
 local paramUtil = ug_require("::/gui/main/script_param_util.tl")
 local tableUtil = ug_require("::/scripts/table_util.tl")
 local react = ug_require("::/gui/main/react.lua")
-local logging = ug_require("apasz_zigzag::/zigzag/logging.lua")
-local logger = logging.new("Zigzag Station", false)
+local logger = ug_require("apasz_zigzag::/zigzag/logger.lua")
 
 
 

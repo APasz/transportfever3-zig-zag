@@ -1,9 +1,4 @@
-local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local math = _tl_compat and _tl_compat.math or math; local pairs = _tl_compat and _tl_compat.pairs or pairs; local string = _tl_compat and _tl_compat.string or string; local table = _tl_compat and _tl_compat.table or table; local debugLoggingEnabled = ug_require(
-"apasz_zigzag::/zigzag/logging_config.lua")
-
-local logging = ug_require(
-"apasz_zigzag::/zigzag/logging.lua")
-
+local _tl_compat; if (tonumber((_VERSION or ''):match('[%d.]*$')) or 0) < 5.3 then local p, m = pcall(require, 'compat53.module'); if p then _tl_compat = m end end; local ipairs = _tl_compat and _tl_compat.ipairs or ipairs; local math = _tl_compat and _tl_compat.math or math; local pairs = _tl_compat and _tl_compat.pairs or pairs; local string = _tl_compat and _tl_compat.string or string; local table = _tl_compat and _tl_compat.table or table; local logger = ug_require("apasz_zigzag::/zigzag/logger.lua")
 local trackSelection = ug_require(
 "apasz_zigzag::/zigzag/track_selection.lua")
 
@@ -23,7 +18,6 @@ local PASSENGER_PLATFORM_PATH_PREFIX =
 "::/stations/rail/modular_station/platform_passenger_era_"
 local CARGO_PLATFORM_PATH_PREFIX =
 "::/stations/rail/modular_station/platform_cargo_era_"
-local logger = logging.new("Zigzag Station", debugLoggingEnabled)
 
 local COST_MODES = {
    "NO_COST",

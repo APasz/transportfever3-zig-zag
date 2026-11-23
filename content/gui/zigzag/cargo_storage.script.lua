@@ -10,6 +10,7 @@ local stationWindow = ug_require(
 local cargoStorage = ug_require(
 "apasz_zigzag::/zigzag/cargo_storage.lua")
 
+local logger = ug_require("apasz_zigzag::/zigzag/logger.lua")
 
 
 
@@ -41,7 +42,10 @@ local function stationGroupStores(groupEntity)
          constructionEntity, api.type.ComponentType.CONSTRUCTION)
 
          if construction == nil then
-            error("Zigzag station owner has no construction component")
+            return logger.fail(
+            "station owner has no construction component; station=" .. tostring(stationEntity) ..
+            ", construction=" .. tostring(constructionEntity))
+
          end
          local capacity = cargoStorage.metadata.get(construction.persistentMetadata)
          if capacity ~= nil and capacity > 0 then

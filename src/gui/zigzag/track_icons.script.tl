@@ -4,8 +4,7 @@ local constructionUtil = ug_require "::/gui/construction/construction_react_util
 local paramUtil = ug_require "::/gui/main/script_param_util.tl" as ScriptParamUtil
 local tableUtil = ug_require "::/scripts/table_util.tl" as TableUtil
 local react = ug_require "::/gui/main/react.lua" as React
-local logging = ug_require "apasz_zigzag::/zigzag/logging.lua" as ModLogging.Module
-local logger = logging.new("Zigzag Station", false)
+local logger = ug_require "apasz_zigzag::/zigzag/logger.lua" as ModLogging.Logger
 
 local type RowRenderer = function(number): TreeNodeId
 local type TrackParamsByPeriod = {integer: {integer: ScriptParam}}

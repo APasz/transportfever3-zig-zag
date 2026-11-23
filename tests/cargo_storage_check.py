@@ -31,6 +31,10 @@ def main() -> None:
             (native_dir / "entity_window_util.tl").write_bytes(
                 archive.read("gui/entity_window/entity_window_util.tl")
             )
+            (native_dir / "station_group.tl").write_bytes(
+                archive.read("gui/entity_window/station_group/station_group.tl")
+            )
+            (native_dir / "bootstrap_game.tl").write_bytes(archive.read("gui/main/bootstrap_game.tl"))
         if args.terminal_selector_dir is not None:
             content = args.terminal_selector_dir / "content"
             for name in ("station_terminals_plugin.script.tl", "station_terminals_plugin.res.lua"):

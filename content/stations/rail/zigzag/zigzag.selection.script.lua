@@ -7,6 +7,9 @@ local validationMetadata = ug_require(
 local cargoStorage = ug_require(
 "apasz_zigzag::/zigzag/cargo_storage.lua")
 
+local logger = ug_require("apasz_zigzag::/zigzag/logger.lua")
+local hasStationWindow = ug_require("apasz_zigzag::/zigzag/has_station_window.lua")
+
 
 
 
@@ -119,7 +122,7 @@ function selection.guiHandleEvent(
       return nil
    end
    if type(param) ~= "number" or (param) % 1 ~= 0 then
-      error("Zigzag selection requires an integer entity ID")
+      return logger.fail("selection requires an integer entity ID; entity=" .. tostring(param))
    end
    local entity = param
    if entity < 0 or not api.engine.entityExists(entity) then
@@ -140,21 +143,15 @@ function selection.guiHandleEvent(
    api.type.ComponentType.CONSTRUCTION)
 
    if construction == nil then
-      error("Zigzag selected track owner has no construction component")
+      return logger.fail(
+      "selected track owner has no construction component; edge=" .. tostring(entity) ..
+      ", construction=" .. tostring(constructionEntity))
+
    end
    local params = captureParams
-   local expectedWindowScript = api.res.constructionRep.findAndGet(
-   params.constructionFileName).
-   entityWindowScript.fileName
-   if expectedWindowScript == "" then
-      error("Zigzag construction has no station window script")
-   end
 
 
-   local actualWindowScript = api.res.constructionRep.findAndGet(
-   construction.fileName).
-   entityWindowScript.fileName
-   if actualWindowScript ~= expectedWindowScript then
+   if not hasStationWindow(construction, params.constructionFileName) then
       return nil
    end
 
